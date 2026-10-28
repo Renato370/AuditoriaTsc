@@ -3,7 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
+const MIN_SERVER = '1.1.0';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -23,6 +24,9 @@ const int = v => NUM.format(Math.round(+v || 0));
 const pad = n => String(n).padStart(2, '0');
 const ymdOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 const today = () => ymdOf(new Date());
+const ontem = () => { const d = new Date(); d.setDate(d.getDate() - 1); return ymdOf(d); };
+const isMaster = () => !!(S.user && S.user.perfil === 'Master');
+const verLt = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const nowStr = () => { const d = new Date(); return ymdOf(d) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
 const dBR = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
 const dShort = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) : '';
@@ -165,7 +169,7 @@ async function api(action, payload = {}, opts = {}) {
     }
   }
   if (!j.ok) {
-    const e = new Error(String(j.error || 'Erro no servidor').replace(/^(AUTH|DUPLICADO):\s*/, ''));
+    const e = new Error(String(j.error || 'Erro no servidor').replace(/^(AUTH|DUPLICADO|PERMISSAO):\s*/, ''));
     e.server = true;
     if (/^AUTH/.test(j.error)) e.auth = true;
     if (/^DUPLICADO/.test(j.error)) e.dup = true;
@@ -179,7 +183,9 @@ function applyBootstrap(b) {
   // substitui as vendas recentes; mantém as antigas carregadas sob demanda
   for (const [id, v] of S.vmap) if (v.data >= b.corte) S.vmap.delete(id);
   vendas.forEach(v => S.vmap.set(v.id, v));
-  S.data = Object.assign({}, b, { vendas });
+  S.data = Object.assign({}, b, { vendas, solicitacoes: b.solicitacoes || [] });
+  S.serverOld = verLt(b.version, MIN_SERVER);
+  if (b.me && S.user && b.me.perfil !== S.user.perfil) { S.user.perfil = b.me.perfil; }
   S.ver++;
 }
 
@@ -222,6 +228,13 @@ function motivosAll() {
   const pend = S.queue.filter(q => q.type === 'motivo').map(q => Object.assign({}, q.motivo, { auditor: S.user && S.user.id, _pending: true, _error: q.error || '' }));
   return base.concat(pend);
 }
+
+function solicAll() {
+  const base = (S.data && S.data.solicitacoes) || [];
+  const pend = S.queue.filter(q => q.type === 'solic').map(q => Object.assign({}, q.solic, { Solicitante: S.user && S.user.nome, Status: 'Pendente', _pending: true, _error: q.error || '' }));
+  return base.concat(pend);
+}
+function solicPendente(vendaId) { return solicAll().find(x => x.VendaId === vendaId && x.Status === 'Pendente'); }
 
 function lojas() { return (S.data && S.data.lojas) || []; }
 function lojaById(id) {
@@ -305,6 +318,9 @@ async function pushItem(item) {
   } else if (item.type === 'motivo') {
     const r = await api('salvarMotivo', { motivo: item.motivo });
     if (S.data) S.data.motivos = S.data.motivos.concat([r.motivo]);
+  } else if (item.type === 'solic') {
+    const r = await api('solicitar', { solic: item.solic });
+    if (S.data && r.solicitacao) S.data.solicitacoes = (S.data.solicitacoes || []).filter(x => x.id_solicitacao !== r.solicitacao.id_solicitacao).concat([r.solicitacao]);
   } else if (item.type === 'loja') {
     const r = await api('salvarLoja', { loja: item.loja, logo: item.logo || undefined });
     if (S.data && r.loja) {
@@ -405,7 +421,8 @@ function topbar({ title, sub = '', backBtn = false, actions = '', search = '' })
   const syncCls = S.syncing ? ' spin' : '';
   const offline = !DEMO && !navigator.onLine;
   return `<header class="top"><div class="wrap">
-    ${DEMO ? '<div class="demo-banner gutter">Demonstração com dados de exemplo — senha de todos: 1234</div>' : ''}
+    ${DEMO ? '<div class="demo-banner gutter">Demonstração com dados de exemplo — senha de todos: 1234 · Renato é o master</div>' : ''}
+    ${S.serverOld ? '<div class="demo-banner gutter">O código da planilha (Code.gs) está desatualizado. Atualize o Apps Script para a versão ' + MIN_SERVER + '.</div>' : ''}
     <div class="top-row gutter">
       ${backBtn ? `<button class="icon-btn" data-act="back" aria-label="Voltar">${ICON.back}</button>` : ''}
       <h1>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h1>
@@ -447,8 +464,9 @@ const VIEWS = {};
 
 /* ---------- Lojas ---------- */
 VIEWS.lojas = () => {
-  const ref = S.ui.ref || today();
-  const isHoje = ref === today();
+  const ref = S.ui.ref || ontem();
+  const refLabel = ref === ontem() ? 'Ontem' : ref === today() ? 'Hoje' : dBR(ref);
+  const solPend = isMaster() ? solicAll().filter(x => x.Status === 'Pendente').length : 0;
   const busca = norm(S.ui.busca);
   const ativas = lojasAll().filter(l => S.ui.inativas || l['Situação'] !== 'Inativo');
   const infos = ativas.map(l => ({ l, i: lojaInfo(l, ref) }));
@@ -475,14 +493,15 @@ VIEWS.lojas = () => {
   const html = `
   ${topbar({ title: 'Lojas', sub: CFG.nomeShopping || '', actions: `<button class="icon-btn" data-act="toggleBusca" aria-label="Buscar">${ICON.search}</button>`, search })}
   <main><div class="wrap">
-    <div class="gutter section">
+    <div class="gutter section" style="display:grid;gap:10px">
+      ${solPend ? `<button class="alert warn" data-act="verSolic" style="border:0;text-align:left;width:100%"><div><b>${solPend} solicitaç${solPend > 1 ? 'ões' : 'ão'} de alteração</b> aguardando sua aprovação. Toque para ver.</div></button>` : ''}
       <div class="card today">
         <div class="today-head">
           <div class="today-big num">${lanc}<small> de ${ativas.length} lojas lançadas</small></div>
-          <label class="date-chip">${ICON.cal.replace('<svg', '<svg width="16" height="16"')}${isHoje ? 'Hoje' : esc(dBR(ref))}<input type="date" id="refDate" value="${ref}" max="${today()}" aria-label="Data de referência"></label>
+          <label class="date-chip">${ICON.cal.replace('<svg', '<svg width="16" height="16"')}${esc(refLabel)}<input type="date" id="refDate" value="${ref}" max="${today()}" aria-label="Data de referência"></label>
         </div>
         <div class="bar"><i style="width:${pct}%"></i></div>
-        <div class="muted" style="font-size:13px">Status de ${esc(diaLongo(ref))}. ${pendCount ? pendCount + ' loja' + (pendCount > 1 ? 's' : '') + ' sem lançamento.' : 'Todas as lojas lançadas.'}</div>
+        <div class="muted" style="font-size:13px">Vendas de ${esc(diaLongo(ref))}. ${pendCount ? pendCount + ' loja' + (pendCount > 1 ? 's' : '') + ' sem lançamento.' : 'Todas as lojas lançadas.'}</div>
       </div>
       <div class="chips" role="group" aria-label="Filtros">
         <button class="chip" data-filtro="todas" aria-pressed="${S.ui.filtro === 'todas'}">Todas<b>${ativas.length}</b></button>
@@ -564,10 +583,10 @@ VIEWS.loja = (p) => {
       </div>
     </div>
     <div class="gutter">
-      <div class="actions">
+      <div class="actions" style="${isMaster() ? '' : 'grid-template-columns:1.4fr 1fr'}">
         <button class="btn primary" data-registrar="${esc(l.IdLoja)}" data-data="">${ICON.dollar}Registrar venda</button>
         <button class="btn" data-act="motivo" data-id="${esc(l.IdLoja)}">${ICON.note}Motivo</button>
-        <button class="btn" data-act="editLoja" data-id="${esc(l.IdLoja)}">${ICON.edit}Editar</button>
+        ${isMaster() ? `<button class="btn" data-act="editLoja" data-id="${esc(l.IdLoja)}">${ICON.edit}Editar</button>` : ''}
       </div>
     </div>
     <div class="gutter section">
@@ -615,7 +634,7 @@ function vendaRow(v, o = {}) {
   const t = o.semLoja ? dBR(v.data) : nome;
   const s = o.semLoja ? `${audNome(v.auditor)}${v.resp ? ' · resp. ' + v.resp : ''}` : `${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`;
   return `<button class="row" data-venda="${esc(v.id)}">
-    <div><div class="t">${esc(t)}${v._pending ? (v._error ? '<span class="badge err">erro</span>' : '<span class="badge">na fila</span>') : ''}</div><div class="s">${esc(s)}</div></div>
+    <div><div class="t">${esc(t)}${v._pending ? (v._error ? '<span class="badge err">erro</span>' : '<span class="badge">na fila</span>') : solicPendente(v.id) ? '<span class="badge">alteração pedida</span>' : ''}</div><div class="s">${esc(s)}</div></div>
     <div class="v num">${money(v.vendas)}<small>${int(v.ticket)} ticket${+v.ticket === 1 ? '' : 's'}</small></div>
   </button>`;
 }
@@ -632,6 +651,10 @@ VIEWS.venda = (p) => {
   if (!v) return { html: topbar({ title: 'Lançamento', backBtn: true }) + '<main><div class="empty">Este lançamento foi excluído.</div></main>' };
   const loja = lojaById(v.loja) || {};
   const q = S.queue.find(x => x.type === 'venda' && x.venda.VendaId === v.id);
+  // auditor pode editar o próprio lançamento enquanto ainda não foi enviado
+  const naoEnviado = q && !S.vmap.has(v.id);
+  const podeEditar = isMaster() || naoEnviado;
+  const sp = solicPendente(v.id);
   const html = `
   ${topbar({ title: 'Lançamento', backBtn: true })}
   <main><div class="wrap">
@@ -651,10 +674,12 @@ VIEWS.venda = (p) => {
       <h3 class="h2">Assinatura</h3>
       <div class="sig-img" id="sigBox">${v._sig ? `<img src="${v._sig}" alt="Assinatura">` : v.assin ? '<span class="muted">Carregando assinatura…</span>' : '<span class="muted">Sem assinatura</span>'}</div>
     </div>
-    <div class="gutter section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    ${sp ? `<div class="gutter section"><button class="alert warn" data-solic="${esc(sp.id_solicitacao)}" style="border:0;text-align:left;width:100%"><div><b>${sp.Tipo === 'Exclusão' ? 'Exclusão' : 'Alteração'} solicitada</b> por ${esc(sp.Solicitante)}${sp.Tipo === 'Exclusão' ? '' : ': ' + esc(resumoSolic(sp))}. ${isMaster() ? 'Toque para aprovar ou recusar.' : 'Aguardando o master.'}</div></button></div>` : ''}
+    ${podeEditar ? `<div class="gutter section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <button class="btn" data-act="editVenda" data-id="${esc(v.id)}">${ICON.edit}Editar</button>
       <button class="btn danger" data-act="askDel" data-id="${esc(v.id)}">${ICON.trash}Excluir</button>
-    </div>
+    </div>` : sp ? '' : `<div class="gutter section"><button class="btn" style="width:100%" data-act="pedirAlteracao" data-id="${esc(v.id)}">${ICON.edit}Solicitar alteração</button>
+      <div class="hint muted" style="font-size:12.5px;margin-top:8px">Encontrou um erro no valor, na data ou no responsável? Peça a correção; o master aprova e a planilha é ajustada.</div></div>`}
     <div class="gutter" id="delBox" hidden>
       <div class="alert bad"><div>Excluir o lançamento de ${esc(loja.NomeFantasia || '')} em ${esc(dBR(v.data))}? A linha será apagada da planilha.</div>
       <div style="display:flex;gap:10px"><button class="btn danger solid" data-act="delVenda" data-id="${esc(v.id)}">Excluir</button><button class="btn" data-act="cancelDel">Cancelar</button></div></div>
@@ -677,7 +702,7 @@ VIEWS.venda = (p) => {
 VIEWS.registrar = (p) => {
   const editing = p.edit ? (merged().byId.get(p.edit) || null) : null;
   const lojaId = editing ? editing.loja : (p.loja || '');
-  const data = editing ? editing.data : (p.data || today());
+  const data = editing ? editing.data : (p.data || ontem());
   const lojasAtivas = lojasAll().filter(l => l['Situação'] !== 'Inativo' || l.IdLoja === lojaId).sort((a, b) => a.NomeFantasia.localeCompare(b.NomeFantasia, 'pt-BR'));
   const html = `
   ${topbar({ title: editing ? 'Editar lançamento' : 'Registro de venda', backBtn: true })}
@@ -907,7 +932,7 @@ function resizeImage(file, max) {
 /* ---------- Histórico ---------- */
 VIEWS.historico = () => {
   const t = S.ui.histTab;
-  const segs = `<div class="seg" role="group">${[['vendas', 'Lançamentos'], ['motivos', 'Motivos'], ['acessos', 'Acessos']].map(([k, l]) => `<button data-htab="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
+  const segs = `<div class="seg" role="group">${[['vendas', 'Vendas'], ['solic', 'Solicitações'], ['motivos', 'Motivos'], ['acessos', 'Acessos']].map(([k, l]) => `<button data-htab="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
   let body = '';
   if (t === 'vendas') {
     const mes = S.ui.histMes || today().slice(0, 7);
@@ -943,6 +968,11 @@ VIEWS.historico = () => {
       ${keys.slice(0, lim).map(k => `<div class="group-h"><span>${esc(diaLongo(k))}</span><span class="num">${money(groups[k].reduce((s, v) => s + (+v.vendas || 0), 0))}</span></div>
         <div class="list">${groups[k].map(v => vendaRow(v)).join('')}</div>`).join('') || (S.loadingMes === mes ? '' : '<div class="empty">' + ICON.hist + '<div>Nenhum lançamento neste mês.</div></div>')}
       ${keys.length > lim ? '<button class="more" data-act="histMais">Ver dias anteriores</button>' : ''}`;
+  } else if (t === 'solic') {
+    const all = solicAll().slice().sort((a, b) => (a.Status === 'Pendente' ? 0 : 1) - (b.Status === 'Pendente' ? 0 : 1) || String(b.DataPedido).localeCompare(String(a.DataPedido)));
+    body = `<div class="section">
+      ${isMaster() ? '' : '<div class="gutter muted" style="font-size:13px;margin-bottom:10px">Suas solicitações. Para pedir uma correção, abra o lançamento e toque em "Solicitar alteração".</div>'}
+      <div class="list">${all.map(solicRowHtml).join('') || '<div class="empty">' + ICON.edit + '<div>Nenhuma solicitação.</div></div>'}</div></div>`;
   } else if (t === 'motivos') {
     const ms = motivosAll().slice().sort((a, b) => b.data.localeCompare(a.data));
     body = `<div class="section"><div class="list">${ms.slice(0, 200).map(motivoRow).join('') || '<div class="empty">Nenhum motivo registrado.</div>'}</div></div>`;
@@ -952,6 +982,141 @@ VIEWS.historico = () => {
   }
   return { html: `${topbar({ title: 'Histórico' })}<main><div class="wrap"><div class="gutter" style="padding-top:14px">${segs}</div>${body}</div></main>${navbar('historico')}` };
 };
+
+/* ---------- Solicitações de alteração ---------- */
+function resumoSolic(s) {
+  const p = [];
+  if (s.NovaData && s.NovaData !== s.DataAtual) p.push('data ' + dBR(s.DataAtual) + ' → ' + dBR(s.NovaData));
+  if (s.NovasVendas !== '' && s.NovasVendas != null && +s.NovasVendas !== +s.VendasAtual) p.push('vendas ' + money(s.VendasAtual) + ' → ' + money(s.NovasVendas));
+  if (s.NovoTicket !== '' && s.NovoTicket != null && +s.NovoTicket !== +s.TicketAtual) p.push('ticket ' + int(s.TicketAtual) + ' → ' + int(s.NovoTicket));
+  if (s.NovoResponsavel && s.NovoResponsavel !== s.ResponsavelAtual) p.push('responsável ' + (s.ResponsavelAtual || '—') + ' → ' + s.NovoResponsavel);
+  return p.join(' · ') || 'sem mudanças';
+}
+function solicStatus(s) {
+  if (s._error) return '<span class="status st-no">Erro</span>';
+  if (s._pending) return `<span class="status st-pend">${ICON.clock}Na fila</span>`;
+  if (s.Status === 'Aprovada') return `<span class="status st-ok">${ICON.check}Aprovada</span>`;
+  if (s.Status === 'Recusada') return `<span class="status st-no">${ICON.x}Recusada</span>`;
+  return `<span class="status st-mot">${ICON.clock}Pendente</span>`;
+}
+function solicRowHtml(s) {
+  const l = lojaById(s.Loja);
+  return `<button class="row" data-solic="${esc(s.id_solicitacao)}">
+    <div><div class="t">${esc(l ? l.NomeFantasia : s.Loja || 'Lançamento')} · ${esc(dShort(s.DataAtual || ''))}</div>
+    <div class="s">${esc(s.Tipo === 'Exclusão' ? 'Excluir lançamento' : resumoSolic(s))}</div>
+    <div class="s">${esc(s.Solicitante || '')}${s.DataPedido ? ' · ' + esc(dtBR(s.DataPedido)) : ''}</div></div>
+    <div class="v">${solicStatus(s)}</div></button>`;
+}
+
+VIEWS.pedir = (p) => {
+  const v = merged().byId.get(p.id);
+  if (!v) return { html: topbar({ title: 'Solicitar alteração', backBtn: true }) + '<main><div class="empty">Lançamento não encontrado.</div></main>' };
+  const loja = lojaById(v.loja) || {};
+  const tipo = p.tipo || 'Alteração';
+  const html = `
+  ${topbar({ title: 'Solicitar alteração', backBtn: true })}
+  <main class="form-main"><div class="wrap gutter">
+    <div class="fields">
+      <div class="card" style="padding:14px 16px;display:grid;gap:2px">
+        <span class="muted" style="font-size:13px">Lançamento atual</span>
+        <b>${esc(loja.NomeFantasia || v.nome)} · ${esc(dBR(v.data))}</b>
+        <span class="num">${money(v.vendas)} · ${int(v.ticket)} tickets · resp. ${esc(v.resp || '—')}</span>
+      </div>
+      <div class="seg" role="group">${['Alteração', 'Exclusão'].map(t => `<button type="button" data-ptipo="${t}" aria-pressed="${tipo === t}">${t === 'Alteração' ? 'Corrigir dados' : 'Excluir lançamento'}</button>`).join('')}</div>
+      <div id="pCampos" ${tipo === 'Exclusão' ? 'hidden' : ''} style="display:grid;gap:18px">
+        <div class="field" id="fdPData"><label for="pData">Data correta</label>
+          <input class="input" type="date" id="pData" value="${v.data}" max="${today()}"></div>
+        <div class="field" id="fdPVendas"><label for="pVendas">Valor correto das vendas</label>
+          <input class="input money num" id="pVendas" inputmode="numeric" value="${money(v.vendas)}"></div>
+        <div class="field" id="fdPTicket"><label for="pTicket">Ticket correto</label>
+          <input class="input num" id="pTicket" type="number" inputmode="numeric" min="0" value="${esc(v.ticket)}"></div>
+        <div class="field"><label for="pResp">Responsável correto</label>
+          <input class="input" id="pResp" value="${esc(v.resp || '')}"></div>
+        <div id="pDup"></div>
+      </div>
+      <div class="field" id="fdPMot"><label for="pMot">Motivo da solicitação<span class="req">*</span></label>
+        <textarea id="pMot" placeholder="Ex.: digitei R$ 345,00 mas o correto é R$ 3.450,00"></textarea></div>
+    </div>
+  </div></main>
+  <div class="formbar"><button class="btn" data-act="back">Cancelar</button><button class="btn primary" data-act="enviarPedido" data-id="${esc(v.id)}">${ICON.check}Enviar solicitação</button></div>`;
+  return {
+    html, form: true,
+    mount() {
+      const f = $('#pVendas');
+      let cents = Math.round(+v.vendas * 100);
+      f.addEventListener('input', () => { const d = f.value.replace(/\D/g, '').replace(/^0+(?=\d)/, ''); cents = d ? parseInt(d.slice(0, 13), 10) : null; f.value = cents == null ? '' : money(cents / 100); });
+      S.getPCents = () => cents;
+      const dup = () => { const dt = $('#pData').value; const ex = merged().byLojaData.get(v.loja + '|' + dt); $('#pDup').innerHTML = ex && ex.id !== v.id ? `<div class="alert warn">Já existe outro lançamento desta loja em ${esc(dBR(dt))} (${money(ex.vendas)}). A solicitação será recusada pela planilha se for aprovada assim.</div>` : ''; };
+      $('#pData').addEventListener('change', dup);
+    }
+  };
+};
+
+function enviarPedido(id) {
+  const v = merged().byId.get(id);
+  const tipo = ($('[data-ptipo][aria-pressed="true"]') || { dataset: { ptipo: 'Alteração' } }).dataset.ptipo;
+  const motivo = $('#pMot').value.trim();
+  if (!motivo) { fieldErr('fdPMot', 'Explique o que está errado.'); return; }
+  const solic = { id_solicitacao: uid(), VendaId: id, Loja: v.loja, Tipo: tipo, Motivo: motivo, DataPedido: new Date().toISOString(),
+    DataAtual: v.data, VendasAtual: +v.vendas, TicketAtual: +v.ticket, ResponsavelAtual: v.resp || '' };
+  if (tipo === 'Alteração') {
+    const cents = S.getPCents();
+    if (cents == null) { fieldErr('fdPVendas', 'Informe o valor.'); return; }
+    const tk = $('#pTicket').value;
+    if (tk === '' || +tk < 0) { fieldErr('fdPTicket', 'Informe o ticket.'); return; }
+    Object.assign(solic, { NovaData: $('#pData').value || v.data, NovasVendas: cents / 100, NovoTicket: +tk, NovoResponsavel: $('#pResp').value.trim() || v.resp });
+    if (resumoSolic(solic) === 'sem mudanças') { toast('Altere pelo menos um campo, ou escolha "Excluir lançamento".'); return; }
+  }
+  enqueue({ type: 'solic', solic });
+  toast('Solicitação enviada para o master.');
+  back();
+}
+
+VIEWS.solic = (p) => {
+  const s = solicAll().find(x => x.id_solicitacao === p.id);
+  if (!s) return { html: topbar({ title: 'Solicitação', backBtn: true }) + '<main><div class="empty">Solicitação não encontrada.</div></main>' };
+  const l = lojaById(s.Loja) || {};
+  const v = merged().byId.get(s.VendaId);
+  const linha = (k, a, b) => `<dt>${k}</dt><dd>${a === b || b === '' || b == null ? esc(a || '—') : `<span class="muted" style="text-decoration:line-through">${esc(a || '—')}</span><br><span style="color:var(--brand)">${esc(b)}</span>`}</dd>`;
+  const pode = isMaster() && s.Status === 'Pendente' && !s._pending;
+  const html = `
+  ${topbar({ title: 'Solicitação', backBtn: true })}
+  <main class="${pode ? 'form-main' : ''}"><div class="wrap">
+    <div class="gutter big-value" style="gap:8px">
+      <span class="muted">${esc(l.NomeFantasia || s.Loja)} · pedido por ${esc(s.Solicitante || '')}${s.DataPedido ? ' em ' + esc(dtBR(s.DataPedido)) : ''}</span>
+      <span style="font-size:24px;font-weight:800">${s.Tipo === 'Exclusão' ? 'Excluir lançamento' : 'Corrigir lançamento'}</span>
+      <span>${solicStatus(s)}</span>
+    </div>
+    <dl class="dl">
+      ${s.Tipo === 'Exclusão'
+        ? linha('Data', dBR(s.DataAtual)) + linha('Vendas', money(s.VendasAtual)) + linha('Ticket', int(s.TicketAtual)) + linha('Responsável', s.ResponsavelAtual)
+        : linha('Data', dBR(s.DataAtual), dBR(s.NovaData)) + linha('Vendas', money(s.VendasAtual), money(s.NovasVendas)) + linha('Ticket', int(s.TicketAtual), int(s.NovoTicket)) + linha('Responsável', s.ResponsavelAtual, s.NovoResponsavel)}
+      <dt>Motivo</dt><dd style="white-space:pre-wrap">${esc(s.Motivo)}</dd>
+      ${s.Status !== 'Pendente' ? `<dt>${esc(s.Status)} por</dt><dd>${esc(s.ResolvidoPor)}${s.DataResolucao ? ' · ' + esc(dtBR(s.DataResolucao)) : ''}</dd>${s.Resposta ? `<dt>Resposta</dt><dd>${esc(s.Resposta)}</dd>` : ''}` : ''}
+    </dl>
+    ${v ? `<div class="gutter section"><button class="btn" style="width:100%" data-venda="${esc(v.id)}">Abrir lançamento</button></div>` : ''}
+    ${pode ? `<div class="gutter section"><div class="field"><label for="sResp">Resposta (opcional)</label><textarea id="sResp" style="min-height:80px" placeholder="Visível para quem pediu"></textarea></div><div id="sErr" style="margin-top:12px"></div></div>` : ''}
+  </div></main>
+  ${pode ? `<div class="formbar"><button class="btn danger" data-act="resolver" data-id="${esc(s.id_solicitacao)}" data-ok="0">${ICON.x}Recusar</button><button class="btn primary" data-act="resolver" data-id="${esc(s.id_solicitacao)}" data-ok="1">${ICON.check}Aprovar${s.Tipo === 'Exclusão' ? ' e excluir' : ' e corrigir'}</button></div>` : ''}`;
+  return { html, form: pode };
+};
+
+async function resolver(id, aprovar) {
+  if (!DEMO && !navigator.onLine) { toast('Aprovar ou recusar precisa de internet.'); return; }
+  const btns = $$('[data-act="resolver"]'); btns.forEach(b => { b.disabled = true; });
+  try {
+    const r = await api('resolverSolicitacao', { id, aprovar, resposta: ($('#sResp') || {}).value || '' });
+    if (r.row) { const nv = rowsToVendas(r.cols, [r.row])[0]; const old = S.vmap.get(nv.id); S.vmap.set(nv.id, nv); if (S.data) { S.data.vendas = S.data.vendas.filter(x => x.id !== nv.id); upsertRecent(nv); } if (old && old.data !== nv.data) S.ver++; }
+    if (r.excluida) { S.vmap.delete(r.excluida); if (S.data) S.data.vendas = S.data.vendas.filter(x => x.id !== r.excluida); }
+    if (S.data) S.data.solicitacoes = S.data.solicitacoes.map(x => x.id_solicitacao === id ? r.solicitacao : x);
+    S.ver++; persist();
+    toast(aprovar ? 'Aprovada. A planilha foi corrigida.' : 'Solicitação recusada.');
+    back();
+  } catch (e) {
+    const b = $('#sErr'); if (b) b.innerHTML = `<div class="alert bad">${esc(e.message)}</div>`;
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
 
 /* ---------- Painel ---------- */
 VIEWS.painel = () => {
@@ -1078,6 +1243,7 @@ VIEWS.mais = () => {
     if (q.type === 'venda') { const l = lojaById(q.venda.Loja); return `Venda · ${l ? l.NomeFantasia : ''} · ${dBR(q.venda.Data)} · ${money(q.venda.Vendas)}`; }
     if (q.type === 'motivo') { const l = lojaById(q.motivo.loja); return `Motivo · ${l ? l.NomeFantasia : ''}`; }
     if (q.type === 'loja') return `Cadastro · ${q.loja.NomeFantasia}`;
+    if (q.type === 'solic') return `Solicitação de ${q.solic.Tipo === 'Exclusão' ? 'exclusão' : 'alteração'}`;
     return 'Exclusão de lançamento';
   };
   const html = `
@@ -1086,7 +1252,7 @@ VIEWS.mais = () => {
     <div class="gutter section">
       <div class="card" style="padding:16px;display:flex;gap:14px;align-items:center">
         <span class="avatar" style="border-radius:50%;background:hsl(${hueOf(S.user.nome)} 42% 38%)">${esc(initials(S.user.nome))}</span>
-        <div style="min-width:0;flex:1"><div style="font-weight:800;font-size:17px">${esc(S.user.nome)}</div><div class="muted" style="font-size:13px">Auditor(a)</div></div>
+        <div style="min-width:0;flex:1"><div style="font-weight:800;font-size:17px">${esc(S.user.nome)}</div><div class="muted" style="font-size:13px">${isMaster() ? 'Master — pode alterar todas as informações' : 'Auditor(a) — lança vendas e solicita alterações'}</div></div>
         <button class="btn" data-act="logout">Sair</button>
       </div>
     </div>
@@ -1102,10 +1268,10 @@ VIEWS.mais = () => {
         ${errs.length ? '<div class="alert bad">Alguns itens foram recusados pela planilha. Corrija ou descarte.</div>' : ''}
       </div>
     </div>
-    <div class="gutter section">
+    ${isMaster() ? `<div class="gutter section">
       <h3 class="h2">Lojas</h3>
       <button class="btn" style="width:100%" data-act="novaLoja">${ICON.plus}Cadastrar nova loja</button>
-    </div>
+    </div>` : ''}
     ${S.installEvt ? `<div class="gutter section"><h3 class="h2">Aplicativo</h3><button class="btn primary" style="width:100%" data-act="install">Instalar na tela inicial</button></div>` : ''}
     <div class="gutter section">
       <h3 class="h2">Servidor</h3>
@@ -1138,7 +1304,7 @@ VIEWS.login = () => {
   const auds = S.auditoresLogin;
   const sel = S.ui.loginSel || '';
   return {
-    html: `<main>${DEMO ? '<div class="demo-banner gutter">Demonstração com dados de exemplo — senha de todos: 1234</div>' : ''}<div class="login gutter">
+    html: `<main>${DEMO ? '<div class="demo-banner gutter">Demonstração com dados de exemplo — senha de todos: 1234 · Renato é o master</div>' : ''}<div class="login gutter">
       <div class="brand-mark"><span class="logo">${ICON.mall}</span><h1>Auditoria de Vendas</h1><div class="muted">${esc(CFG.nomeShopping || '')}</div></div>
       <div class="field"><span class="label">Quem está usando?</span>
         <div class="who">${auds.length ? auds.map(a => `<button data-who="${esc(a.nome)}" aria-pressed="${sel === a.nome}"><span class="avatar" style="background:hsl(${hueOf(a.nome)} 42% 38%)">${esc(initials(a.nome))}</span>${esc(a.nome)}</button>`).join('') : '<div class="loading">Carregando auditores…</div>'}</div></div>
@@ -1155,6 +1321,7 @@ VIEWS.login = () => {
 async function loadAuditores() {
   try {
     const r = await api('auditores', {}, { auth: false });
+    if (JSON.stringify(r.auditores) === JSON.stringify(S.auditoresLogin)) return;
     S.auditoresLogin = r.auditores;
     await KV.set('auditores', r.auditores);
   } catch (e) {
@@ -1162,7 +1329,11 @@ async function loadAuditores() {
     if (c) S.auditoresLogin = c;
     else { const b = $('#loginErr'); if (b) b.innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; return; }
   }
-  if (cur().v === 'login') render();
+  if (cur().v === 'login') {
+    const senha = $('#senha') ? $('#senha').value : '';
+    render();
+    if (senha && $('#senha')) $('#senha').value = senha;
+  }
 }
 
 async function doLogin() {
@@ -1173,7 +1344,7 @@ async function doLogin() {
   const btn = $('[data-act="loginGo"]'); btn.disabled = true; btn.textContent = 'Entrando…';
   try {
     const r = await api('login', { auth: { nome, senha } }, { auth: false });
-    S.user = { id: r.user.id, nome: r.user.nome, senha };
+    S.user = { id: r.user.id, nome: r.user.nome, senha, perfil: r.user.perfil || 'Auditor' };
     await persist();
     S.stack = [{ v: 'lojas', p: {} }];
     render();
@@ -1230,11 +1401,13 @@ function updateChrome() {
 
 /* ============================ Eventos ============================ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
+  const t = e.target.closest('[data-act],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.tab) return tab(d.tab);
-  if (d.registrar !== undefined) { e.stopPropagation(); return go('registrar', { loja: d.registrar, data: d.data || today() }); }
+  if (d.solic) return go('solic', { id: d.solic });
+  if (d.ptipo) { $$('[data-ptipo]').forEach(b => b.setAttribute('aria-pressed', b === t)); $('#pCampos').hidden = d.ptipo === 'Exclusão'; return; }
+  if (d.registrar !== undefined) { e.stopPropagation(); return go('registrar', { loja: d.registrar, data: d.data || ontem() }); }
   if (d.venda) return go('venda', { id: d.venda });
   if (d.loja) return go('loja', { id: d.loja, mes: d.lojames || '' });
   if (d.filtro) { S.ui.filtro = d.filtro; persist(); return render(); }
@@ -1258,6 +1431,10 @@ document.addEventListener('click', e => {
     case 'painelMes': S.ui.painelMes = d.mes; return refresh();
     case 'rankAll': S.ui.rankAll = !S.ui.rankAll; return refresh();
     case 'motivo': return go('motivo', { loja: d.id });
+    case 'verSolic': S.ui.histTab = 'solic'; return tab('historico');
+    case 'pedirAlteracao': return go('pedir', { id: d.id });
+    case 'enviarPedido': return enviarPedido(d.id);
+    case 'resolver': return resolver(d.id, d.ok === '1');
     case 'editLoja': return go('lojaForm', { id: d.id });
     case 'novaLoja': return go('lojaForm', {});
     case 'editVenda': return go('registrar', { edit: d.id });
@@ -1323,7 +1500,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const id = e.target.id;
   const fd = e.target.closest && e.target.closest('.field.invalid'); if (fd) fieldErr(fd.id, '');
-  if (id === 'refDate') { S.ui.ref = e.target.value && e.target.value !== today() ? e.target.value : ''; render(); }
+  if (id === 'refDate') { S.ui.ref = e.target.value && e.target.value !== ontem() ? e.target.value : ''; render(); }
   if (id === 'fPiso') { S.ui.piso = e.target.value; persist(); render(); }
   if (id === 'fOrdem') { S.ui.ordem = e.target.value; persist(); render(); }
   if (id === 'hAud') { S.ui.histAud = e.target.value; render(); }
