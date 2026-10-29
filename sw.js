@@ -1,5 +1,5 @@
 /* Service worker: guarda o app no aparelho para abrir sem internet. */
-const CACHE = 'auditoria-v1.3.5';
+const CACHE = 'auditoria-v1.4.0';
 const SHELL = ['./', 'index.html', 'app.js', 'config.js', 'app-v131.webmanifest', 'icons/selo-192.png', 'icons/selo-512.png', 'icons/shopping-logo.png', 'icons/selo-apple-180.png'];
 
 self.addEventListener('install', e => {

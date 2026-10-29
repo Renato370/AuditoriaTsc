@@ -3,8 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.3.5';
-const MIN_SERVER = '1.3.5';
+const APP_VERSION = '1.4.0';
+const MIN_SERVER = '1.4.0';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -435,8 +435,33 @@ function janelaAtraso() {
   if (S.data && S.data.corte) n = Math.min(n, diasEntre(today(), S.data.corte));
   return Math.max(1, n);
 }
-const lojasRota = () => lojasAll().filter(l => l['Situação'] !== 'Inativo' && l.Rota !== 'Não');
-const naRota = l => l && l['Situação'] !== 'Inativo' && l.Rota !== 'Não';
+/* Lojas eventuais (Mercado Produtor, eventos…): só são esperadas dentro do período definido pelo master */
+const ehEventual = l => !!l && l.Operacao === 'Eventual';
+function lojaEsperada(l, dia) {
+  if (!l || l['Situação'] === 'Inativo') return false;
+  if (!ehEventual(l)) return true;
+  return !!l.Inicio && dia >= l.Inicio && (!l.Fim || dia <= l.Fim);
+}
+function periodoTxt(l) {
+  if (!ehEventual(l)) return '';
+  if (!l.Inicio) return 'sem período definido';
+  return 'opera ' + (l.Fim ? `de ${dShort(l.Inicio)} a ${dShort(l.Fim)}` : `desde ${dShort(l.Inicio)}`);
+}
+/* eventual entra na rota se o período cruza a janela de atrasos */
+const naRota = l => {
+  if (!l || l['Situação'] === 'Inativo' || l.Rota === 'Não') return false;
+  if (!ehEventual(l)) return true;
+  if (!l.Inicio || l.Inicio > ontem()) return false;
+  return !l.Fim || l.Fim >= addDias(ontem(), -janelaAtraso());
+};
+const lojasRota = () => lojasAll().filter(naRota);
+function diasEsperadosNoMes(l, mes) {
+  if (!l || l['Situação'] === 'Inativo') return 0;
+  const nd = daysIn(mes);
+  if (!ehEventual(l)) return nd;
+  let n = 0; for (let i = 1; i <= nd; i++) if (lojaEsperada(l, mes + '-' + pad(i))) n++;
+  return n;
+}
 const addDias = (ymd, n) => { const d = new Date(ymd.slice(0, 10) + 'T12:00:00'); d.setDate(d.getDate() + n); return ymdOf(d); };
 const diasEntre = (a, b) => Math.round((Date.parse(a.slice(0, 10) + 'T12:00:00Z') - Date.parse(b.slice(0, 10) + 'T12:00:00Z')) / 864e5);
 
@@ -498,12 +523,13 @@ function ordemRota(a, b) {
 function diasAtrasados(lojaId, n) {
   const M = merged();
   const mot = new Set(motivosAll().filter(m => m.loja === lojaId).map(m => m.data.slice(0, 10)));
+  const l = lojaById(lojaId);
   const out = [];
   const d = new Date();
   for (let i = 1; i <= n; i++) {
     d.setDate(d.getDate() - 1);
     const k = ymdOf(d);
-    if (!M.byLojaData.has(lojaId + '|' + k) && !mot.has(k)) out.push(k);
+    if (lojaEsperada(l, k) && !M.byLojaData.has(lojaId + '|' + k) && !mot.has(k)) out.push(k);
   }
   return out.sort();   // mais antigo primeiro
 }
@@ -612,13 +638,18 @@ VIEWS.lojas = () => {
   const refLabel = ref === ontem() ? 'Ontem' : ref === today() ? 'Hoje' : dBR(ref);
   const solPend = isMaster() ? solicAll().filter(x => x.Status === 'Pendente').length : 0;
   const busca = norm(S.ui.busca);
-  const ativas = lojasAll().filter(l => (isMaster() && S.ui.inativas) || l['Situação'] !== 'Inativo');
-  const infos = ativas.map(l => ({ l, i: lojaInfo(l, ref) }));
-  const lanc = infos.filter(x => x.i.kind === 'ok' || x.i.kind === 'pend').length;
+  const visiveis = lojasAll().filter(l => (isMaster() && S.ui.inativas) || l['Situação'] !== 'Inativo');
+  const eventuais = visiveis.filter(ehEventual);
+  const modoEv = S.ui.filtro === 'eventuais';
+  // eventual fora do período não aparece nas listas do dia (só no filtro "Eventuais")
+  const ativas = visiveis.filter(l => !ehEventual(l) || lojaEsperada(l, ref));
   const nAtr = S.ui.atrasoDias ? Math.min(S.ui.atrasoDias, janelaAtraso()) : janelaAtraso();
-  infos.forEach(x => { x.atr = naRota(x.l) ? diasAtrasados(x.l.IdLoja, nAtr) : []; });
-  const atrLojas = infos.filter(x => x.atr.length).length;
-  const atrDias = infos.reduce((s, x) => s + x.atr.length, 0);
+  const mk = l => ({ l, i: lojaInfo(l, ref), atr: naRota(l) ? diasAtrasados(l.IdLoja, nAtr) : [] });
+  const infosAtivas = ativas.map(mk);
+  const infos = modoEv ? eventuais.map(mk) : infosAtivas;
+  const lanc = infosAtivas.filter(x => x.i.kind === 'ok' || x.i.kind === 'pend').length;
+  const atrLojas = infosAtivas.filter(x => x.atr.length).length;
+  const atrDias = infosAtivas.reduce((s, x) => s + x.atr.length, 0);
   const modoAtr = S.ui.filtro === 'atrasadas';
   const pisos = Array.from(new Set(lojasAll().map(l => l.Piso).filter(Boolean))).sort();
   let list = infos.filter(x => {
@@ -632,6 +663,7 @@ VIEWS.lojas = () => {
   const ord = S.ui.ordem;
   list.sort((a, b) => {
     if (modoAtr) return b.atr.length - a.atr.length || ordemRota(a.l, b.l);
+    if (modoEv) return (lojaEsperada(b.l, ref) - lojaEsperada(a.l, ref)) || a.l.NomeFantasia.localeCompare(b.l.NomeFantasia, 'pt-BR');
     if (ord === 'nome') return a.l.NomeFantasia.localeCompare(b.l.NomeFantasia, 'pt-BR');
     if (ord === 'coleta') return (a.i.ultima || '').localeCompare(b.i.ultima || '');
     if (ord === 'dias') return a.i.dias - b.i.dias || a.l.NomeFantasia.localeCompare(b.l.NomeFantasia, 'pt-BR');
@@ -647,7 +679,8 @@ VIEWS.lojas = () => {
     <div class="gutter section" style="display:grid;gap:10px">
       ${solPend ? `<button class="alert warn" data-act="verSolic" style="border:0;text-align:left;width:100%"><div><b>${solPend} solicitaç${solPend > 1 ? 'ões' : 'ão'} de alteração</b> aguardando sua aprovação. Toque para ver.</div></button>` : ''}
       ${modoAtr ? `<div class="alert ${atrDias ? 'warn' : 'ok'}"><div>${atrDias ? `<b>${atrLojas} loja${atrLojas > 1 ? 's' : ''}</b> com dias sem lançamento nos últimos ${nAtr} dias (${atrDias} dia${atrDias > 1 ? 's' : ''} no total). Toque em <b>+ Lançar</b> para começar pelo dia mais antigo; depois de salvar, o app leva ao próximo.` : `Nenhuma loja com dias em atraso nos últimos ${nAtr} dias.`}</div></div>` : ''}
-      <div class="card today" ${modoAtr ? 'hidden' : ''}>
+      ${modoEv ? `<div class="alert warn"><div><b>Lojas eventuais</b> (Mercado Produtor, eventos, feiras): só contam como pendentes dentro do período em que operam${isMaster() ? '. Defina o início e o fim na tela de cada loja' : ''}. Aqui dá para lançar a venda de qualquer dia em que ela abriu.</div></div>` : ''}
+      <div class="card today" ${modoAtr || modoEv ? 'hidden' : ''}>
         <div class="today-head">
           <div class="today-big num">${lanc}<small> de ${ativas.length} lojas lançadas</small></div>
           <label class="date-chip">${ICON.cal.replace('<svg', '<svg width="16" height="16"')}${esc(refLabel)}<input type="date" id="refDate" value="${ref}" max="${today()}" aria-label="Data de referência"></label>
@@ -661,6 +694,7 @@ VIEWS.lojas = () => {
         <button class="chip" data-filtro="pendentes" aria-pressed="${S.ui.filtro === 'pendentes'}">Pendentes<b>${pendCount}</b></button>
         <button class="chip" data-filtro="lancadas" aria-pressed="${S.ui.filtro === 'lancadas'}">Lançadas<b>${lanc}</b></button>
         <button class="chip" data-filtro="atrasadas" aria-pressed="${modoAtr}">Atrasadas<b>${atrLojas}</b></button>
+        ${eventuais.length ? `<button class="chip" data-filtro="eventuais" aria-pressed="${modoEv}">Eventuais<b>${eventuais.length}</b></button>` : ''}
         ${modoAtr ? `<select class="chip" id="fAtraso" aria-label="Período">${Array.from(new Set([7, 15, 30, 60, nAtr])).filter(n => n <= janelaAtraso() || n === nAtr).sort((a, b) => a - b).map(n => `<option value="${n}" ${nAtr === n ? 'selected' : ''}>Últimos ${n} dias</option>`).join('')}</select>` : ''}
         <select class="chip" id="fPiso" aria-label="Piso"><option value="">Todos os pisos</option>${pisos.map(p => `<option ${S.ui.piso === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
         <select class="chip" id="fOrdem" aria-label="Ordenar">
@@ -675,14 +709,15 @@ VIEWS.lojas = () => {
         ${avatar(l)}
         <div class="store-main">
           <div class="store-name">${esc(l.NomeFantasia)}${l['Situação'] === 'Inativo' ? ' <span class="badge">inativa</span>' : l.Rota === 'Não' ? ' <span class="badge" style="background:var(--soft);color:var(--muted)">fora da rota</span>' : ''}</div>
-          <div class="store-meta">LUC ${esc(l.Luc)} · ${esc(l.Piso || '—')} · ${esc(l.Segmento || l.Categoria || '')}</div>
+          <div class="store-meta">${ehEventual(l) ? `<b style="color:var(--warn)">Eventual</b> · ${esc(periodoTxt(l))}` : `LUC ${esc(l.Luc)} · ${esc(l.Piso || '—')} · ${esc(l.Segmento || l.Categoria || '')}`}</div>
           <div class="store-prog num"><span class="bar"><i style="width:${Math.round(i.dias / i.total * 100)}%"></i></span>${i.dias}/${i.total} dias · ${i.ultima ? 'coleta ' + esc(dShort(i.ultima) + ' ' + i.ultima.slice(11, 16)) : 'sem coleta'}</div>
         </div>
         <div class="store-side">
           ${modoAtr ? `<span class="status st-no">Faltam ${x.atr.length}</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${x.atr[0]}" data-modo="atrasadas">+ Lançar ${dShort(x.atr[0])}</button>`
+            : modoEv && !lojaEsperada(l, ref) ? `<span class="status" style="background:var(--soft);color:var(--muted)">Fora do período</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`
             : `${statusPill(i.kind)}${i.kind === 'ok' || i.kind === 'pend' ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`}`}
         </div>
-      </div>`; }).join('') : `<div class="empty">${ICON.store}<div>${modoAtr ? 'Nenhuma loja em atraso.' : 'Nenhuma loja encontrada.'}</div></div>`}
+      </div>`; }).join('') : `<div class="empty">${ICON.store}<div>${modoAtr ? 'Nenhuma loja em atraso.' : modoEv ? 'Nenhuma loja eventual.' : 'Nenhuma loja encontrada.'}</div></div>`}
     </div>
   </div></main>
   <button class="fab" data-registrar="" data-data="${ref}" data-modo="dia">${ICON.plus}Registrar venda</button>
@@ -697,11 +732,14 @@ VIEWS.rota = () => {
   const jan = janelaAtraso();
   const itens = rl.map(l => ({ l, d: diasAtrasados(l.IdLoja, jan) }));
   const pend = itens.filter(x => x.d.length);
-  const ontemFeitas = itens.filter(x => !x.d.includes(ontemD)).length;
+  const itOntem = itens.filter(x => lojaEsperada(x.l, ontemD));
+  const ontemFeitas = itOntem.filter(x => !x.d.includes(ontemD)).length;
+  const totOntem = itOntem.length;
+  const nEv = lojasAtivas().filter(ehEventual).length;
   const atrasos = itens.reduce((s, x) => s + x.d.filter(k => k !== ontemD).length, 0);
-  const pct = rl.length ? Math.round(ontemFeitas / rl.length * 100) : 0;
+  const pct = totOntem ? Math.round(ontemFeitas / totOntem * 100) : 0;
   const prox = pend[0];
-  const fora = lojasAtivas().length - rl.length;
+  const fora = lojasAtivas().filter(l => !ehEventual(l) && l.Rota === 'Não').length;
   const porPiso = {};
   pend.forEach(x => { const p = x.l.Piso || 'Sem piso'; (porPiso[p] = porPiso[p] || []).push(x); });
   const chipDias = ds => {
@@ -716,7 +754,7 @@ VIEWS.rota = () => {
     <div class="gutter section" style="display:grid;gap:12px">
       ${isMaster() && solicAll().some(x => x.Status === 'Pendente') ? `<button class="alert warn" data-act="verSolic" style="border:0;text-align:left;width:100%"><div><b>Há solicitações de alteração</b> aguardando sua aprovação. Toque para ver.</div></button>` : ''}
       <div class="card today">
-        <div class="today-head"><div class="today-big num">${ontemFeitas}<small> de ${rl.length} lojas com a venda de ontem</small></div></div>
+        <div class="today-head"><div class="today-big num">${ontemFeitas}<small> de ${totOntem} lojas com a venda de ontem</small></div></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
         <div class="muted" style="font-size:13px">${atrasos ? `E mais <b>${atrasos}</b> lançamento${atrasos > 1 ? 's' : ''} em atraso nos últimos ${jan} dias.` : `Nenhum atraso nos últimos ${jan} dias.`}</div>
       </div>
@@ -733,7 +771,8 @@ VIEWS.rota = () => {
         <div class="store-side"><button class="quick" data-registrar="${esc(x.l.IdLoja)}" data-data="${x.d[0]}" data-modo="rota" title="Começa pelo dia mais antigo">+ Lançar ${dShort(x.d[0])}</button></div>
       </div>`).join('')}</div>`).join('')}
     <div class="gutter section" style="display:grid;gap:8px">
-      <div class="muted" style="font-size:12.5px">A rota mostra as lojas sem a venda de ontem e as que estão com dias em atraso (últimos ${jan} dias), na ordem de piso e LUC. O botão de cada loja abre sempre o dia mais antigo que falta. Dias com motivo registrado não contam como atraso.${fora ? ` ${fora} loja${fora > 1 ? 's' : ''} fora da rota.` : ''}</div>
+      <div class="muted" style="font-size:12.5px">A rota mostra as lojas sem a venda de ontem e as que estão com dias em atraso (últimos ${jan} dias), na ordem de piso e LUC. O botão de cada loja abre sempre o dia mais antigo que falta. Dias com motivo registrado não contam como atraso. Lojas eventuais só entram nos dias do período em que operam.${fora ? ` ${fora} loja${fora > 1 ? 's' : ''} fora da rota.` : ''}</div>
+      ${nEv ? `<button class="btn" data-act="verEventuais">${ICON.store}Lojas eventuais (${nEv})</button>` : ''}
       ${isMaster() ? `<button class="btn" data-act="rotaConfig">${ICON.route}Escolher lojas da rota</button>` : ''}
     </div>
   </div></main>
@@ -837,7 +876,7 @@ function gamificacao(mes) {
     const dias = Array.from(j.dias).sort();
     let seq = 0, max = 0;
     for (const D of dias) {
-      if (rotaLs.length && rotaLs.every(l => coberto(l.IdLoja, addDias(D, -1), D))) { seq++; if (seq >= 3) j.itens.sequencia++; } else seq = 0;
+      if (rotaLs.length && rotaLs.every(l => !lojaEsperada(l, addDias(D, -1)) || coberto(l.IdLoja, addDias(D, -1), D))) { seq++; if (seq >= 3) j.itens.sequencia++; } else seq = 0;
       max = Math.max(max, seq);
     }
     j.seqAtual = seq; j.seqMax = max;
@@ -859,7 +898,7 @@ function gamificacao(mes) {
     let zer = false;
     for (const D of dias) {
       let falta = false;
-      for (let i = 1; i <= 7 && !falta; i++) { const dd = addDias(D, -i); for (const l of rotaLs) if (!coberto(l.IdLoja, dd, D)) { falta = true; break; } }
+      for (let i = 1; i <= 7 && !falta; i++) { const dd = addDias(D, -i); for (const l of rotaLs) if (lojaEsperada(l, dd) && !coberto(l.IdLoja, dd, D)) { falta = true; break; } }
       if (!falta && rotaLs.length) { zer = true; break; }
     }
     const corr = j.itens.correcao + j.itens.exclusao;
@@ -877,9 +916,10 @@ function gamificacao(mes) {
   const totLanc = lista.reduce((t, j) => t + j.lanc.length, 0);
   const totPrazo = lista.reduce((t, j) => t + j.itens.prazo, 0);
   const ontemD = ontem();
-  const ontemOk = rotaLs.filter(l => coberto(l.IdLoja, ontemD, hoje)).length;
+  const rotaOntem = rotaLs.filter(l => lojaEsperada(l, ontemD));
+  const ontemOk = rotaOntem.filter(l => coberto(l.IdLoja, ontemD, hoje)).length;
   const atrasosAgora = rotaLs.reduce((t, l) => t + diasAtrasados(l.IdLoja, janelaAtraso()).length, 0);
-  const val = { lista, totLanc, pctPrazo: totLanc ? Math.round(totPrazo / totLanc * 100) : 0, ontemOk, rotaTotal: rotaLs.length, atrasosAgora, P };
+  const val = { lista, totLanc, pctPrazo: totLanc ? Math.round(totPrazo / totLanc * 100) : 0, ontemOk, rotaTotal: rotaOntem.length, atrasosAgora, P };
   gameCache = { key, val };
   return val;
 }
@@ -1019,6 +1059,7 @@ VIEWS.loja = (p) => {
   const st = (S.data && S.data.stats[l.IdLoja]) || { total: 0 };
   const totalReg = Math.max(st.total, todas.length);
   const fetched = S.lojaFetched.has(l.IdLoja);
+  const cmp = compararLoja(l, mes, todas, doMes);
 
   // calendário
   const first = new Date(+mes.slice(0, 4), +mes.slice(5, 7) - 1, 1).getDay();
@@ -1033,6 +1074,7 @@ VIEWS.loja = (p) => {
     let cls = 'day', inner = `${d}`, act = '';
     if (v) { cls += v._pending ? ' mot' : ' ok'; { const txt = int(v.vendas); inner += `<small class="num" style="font-size:${txt.length > 6 ? 7.5 : txt.length > 5 ? 8.5 : 9.5}px;letter-spacing:-.02em">${esc(txt)}</small>`; } act = `data-venda="${esc(v.id)}"`; }
     else if (ds > hoje) { cls += ' fut'; act = 'disabled'; }
+    else if (!lojaEsperada(l, ds) && l['Situação'] !== 'Inativo') { cls += ' off'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     else if (motDias.has(ds)) { cls += ' mot'; inner += '<small>motivo</small>'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     else { cls += ' miss'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     if (ds === hoje) cls += ' sel';
@@ -1047,7 +1089,7 @@ VIEWS.loja = (p) => {
       ${avatar(l)}
       <div style="min-width:0">
         <h2>${esc(l.NomeFantasia)}</h2>
-        <div class="tags"><span class="tag">LUC ${esc(l.Luc)}</span><span class="tag">${esc(l.Piso)}</span><span class="tag">${esc(l.Tipo)}</span>${l['Situação'] === 'Inativo' ? '<span class="tag">Inativa</span>' : ''}</div>
+        <div class="tags"><span class="tag">LUC ${esc(l.Luc)}</span><span class="tag">${esc(l.Piso)}</span><span class="tag">${esc(l.Tipo)}</span>${ehEventual(l) ? `<span class="tag">Eventual · ${esc(periodoTxt(l))}</span>` : ''}${l['Situação'] === 'Inativo' ? '<span class="tag">Inativa</span>' : ''}</div>
       </div>
     </div>
     <div class="gutter">
@@ -1061,6 +1103,15 @@ VIEWS.loja = (p) => {
           <input type="checkbox" class="switch" data-lojaflag="Situação" data-id="${esc(l.IdLoja)}" ${l['Situação'] !== 'Inativo' ? 'checked' : ''} aria-label="Loja ativa"></label>
         <label style="display:flex;align-items:center;gap:12px;cursor:pointer"><span style="flex:1"><b>Na rota diária</b><br><span class="muted" style="font-size:12.5px">Desligue se o auditor não passa nela todos os dias.</span></span>
           <input type="checkbox" class="switch" data-lojaflag="Rota" data-id="${esc(l.IdLoja)}" ${l.Rota !== 'Não' ? 'checked' : ''} ${l['Situação'] === 'Inativo' ? 'disabled' : ''} aria-label="Na rota diária"></label>
+        <div style="display:grid;gap:8px"><b>Operação</b>
+          <div class="seg">${['Fixa', 'Eventual'].map(o => `<button type="button" data-act="setOperacao" data-op="${o}" data-id="${esc(l.IdLoja)}" aria-pressed="${(ehEventual(l) ? 'Eventual' : 'Fixa') === o}">${o}</button>`).join('')}</div>
+          ${ehEventual(l) ? `<span class="muted" style="font-size:12.5px">Eventual só conta como pendente entre o início e o fim. Sem fim = continua operando.</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+            <label class="field" style="gap:4px"><span style="font-size:12.5px;font-weight:700">Início</span><input class="input" type="date" id="opIni" value="${esc(l.Inicio || '')}" style="min-height:44px;font-size:15px;padding:8px"></label>
+            <label class="field" style="gap:4px"><span style="font-size:12.5px;font-weight:700">Fim</span><input class="input" type="date" id="opFim" value="${esc(l.Fim || '')}" style="min-height:44px;font-size:15px;padding:8px"></label>
+            <button class="btn primary" data-act="salvarPeriodo" data-id="${esc(l.IdLoja)}" style="min-height:44px">Salvar</button>
+          </div>` : '<span class="muted" style="font-size:12.5px">Use "Eventual" para Mercado Produtor, feiras e eventos que operam só em alguns períodos.</span>'}
+        </div>
       </div>` : ''}
     </div>
     <div class="gutter section">
@@ -1070,17 +1121,18 @@ VIEWS.loja = (p) => {
         <button class="cal-nav" data-act="lojaMes" data-mes="${addMonth(mes, 1)}" aria-label="Próximo mês" ${mes >= hoje.slice(0, 7) ? 'disabled' : ''}>${ICON.right}</button>
       </div>
       <div class="kpis">
-        <div class="kpi wide"><span class="l">Vendas no mês</span><span class="v num">${money(tot)}</span></div>
-        <div class="kpi"><span class="l">Tickets</span><span class="v num">${int(tk)}</span></div>
-        <div class="kpi"><span class="l">Ticket médio</span><span class="v num">${tk ? money(tot / tk) : '—'}</span></div>
-        <div class="kpi"><span class="l">Dias lançados</span><span class="v num">${new Set(doMes.map(v => v.data)).size}/${nd}</span></div>
-        <div class="kpi"><span class="l">Venda por m²</span><span class="v num">${abl ? money(tot / abl) : '—'}</span></div>
+        <div class="kpi wide"><span class="l">Vendas no mês</span><span class="v num">${money(tot)}</span>${cmp.d(tot, cmp.pm && cmp.pm.v, 'mês ant.')}${cmp.d(tot, cmp.ly && cmp.ly.v, 'ano ant.')}</div>
+        <div class="kpi"><span class="l">Tickets</span><span class="v num">${int(tk)}</span>${cmp.d(tk, cmp.pm && cmp.pm.t, 'mês ant.')}${cmp.d(tk, cmp.ly && cmp.ly.t, 'ano ant.')}</div>
+        <div class="kpi"><span class="l">Ticket médio</span><span class="v num">${tk ? money(tot / tk) : '—'}</span>${tk ? cmp.d(tot / tk, cmp.pm && cmp.pm.t ? cmp.pm.v / cmp.pm.t : null, 'mês ant.') + cmp.d(tot / tk, cmp.ly && cmp.ly.t ? cmp.ly.v / cmp.ly.t : null, 'ano ant.') : ''}</div>
+        <div class="kpi"><span class="l">Venda por m²</span><span class="v num">${abl ? money(tot / abl) : '—'}</span>${abl ? cmp.d(tot / abl, cmp.pm && cmp.pm.v / abl, 'mês ant.') + cmp.d(tot / abl, cmp.ly && cmp.ly.v / abl, 'ano ant.') : ''}</div>
+        <div class="kpi wide"><span class="l">Dias lançados</span><span class="v num">${new Set(doMes.map(v => v.data)).size}/${ehEventual(l) ? diasEsperadosNoMes(l, mes) || nd : nd}</span>${ehEventual(l) ? `<span class="d muted">dias esperados no período</span>` : ''}</div>
       </div>
+      <div class="muted" style="font-size:12px;margin-top:8px">${esc(cmp.txt)}</div>
     </div>
     <div class="gutter section">
       <div class="card cal">
         <div class="cal-grid">${['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(x => `<span class="cal-dow">${x}</span>`).join('')}${cells}</div>
-        <div class="legend"><span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>Lançado</span><span><i style="border:1px dashed var(--bad)"></i>Pendente (toque para lançar)</span><span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>Motivo / na fila</span></div>
+        <div class="legend"><span><i style="background:var(--ok-soft);border:1px solid var(--ok)"></i>Lançado</span><span><i style="border:1px dashed var(--bad)"></i>Pendente (toque para lançar)</span><span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>Motivo / na fila</span>${ehEventual(l) ? '<span><i style="border:1px solid var(--line)"></i>Fora do período</span>' : ''}</div>
       </div>
     </div>
     <div class="section">
@@ -1102,14 +1154,38 @@ VIEWS.loja = (p) => {
   return { html };
 };
 
+/* Comparação da loja com o mês anterior e o mesmo mês do ano passado.
+   Mês em andamento: compara o mesmo período (dias 1 até o último dia lançado). */
+function compararLoja(l, mes, todas, doMes) {
+  const atual = mes === today().slice(0, 7);
+  const ate = atual ? Math.max(0, ...doMes.map(v => +v.data.slice(8, 10))) || +today().slice(8, 10) : 31;
+  const mensal = (S.data && S.data.mensal) || {};
+  const tot = (m) => {
+    const loc = todas.filter(v => v.data.startsWith(m) && +v.data.slice(8, 10) <= ate);
+    const mm = mensal[m] && mensal[m][l.IdLoja];
+    if (ate >= 31 && mm) return { v: mm[0], t: mm[1] };
+    if (loc.length) return { v: loc.reduce((s, v) => s + (+v.vendas || 0), 0), t: loc.reduce((s, v) => s + (+v.ticket || 0), 0) };
+    return null;
+  };
+  const pmM = addMonth(mes, -1), lyM = addMonth(mes, -12);
+  const d = (x, y, lab) => {
+    if (y == null || !isFinite(y) || !y) return '';
+    const p = (x / y - 1) * 100;
+    return `<span class="d ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${lab}</span>`;
+  };
+  const per = m => atual ? `1–${ate} de ${MESES[+m.slice(5) - 1]}${m.slice(0, 4) !== mes.slice(0, 4) ? '/' + m.slice(0, 4) : ''}` : mesNome(m);
+  return { pm: tot(pmM), ly: tot(lyM), d, txt: `Comparação: mês ant. = ${per(pmM)} · ano ant. = ${per(lyM)}.` };
+}
+
 function vendaRow(v, o = {}) {
   const loja = lojaById(v.loja);
   const nome = (loja && loja.NomeFantasia) || v.nome || v.loja;
   const t = o.semLoja ? dBR(v.data) : nome;
-  const s = o.semLoja ? `${audNome(v.auditor)}${v.resp ? ' · resp. ' + v.resp : ''}` : `${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`;
+  const s = o.reg ? `venda de ${dShort(v.data)} · ${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`
+    : o.semLoja ? `${audNome(v.auditor)}${v.resp ? ' · resp. ' + v.resp : ''}` : `${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`;
   return `<button class="row" data-venda="${esc(v.id)}">
     <div><div class="t">${esc(t)}${v._pending ? (v._error ? '<span class="badge err">erro</span>' : '<span class="badge">na fila</span>') : solicPendente(v.id) ? '<span class="badge">alteração pedida</span>' : ''}</div><div class="s">${esc(s)}</div></div>
-    <div class="v num">${money(v.vendas)}<small>${int(v.ticket)} ticket${+v.ticket === 1 ? '' : 's'}</small></div>
+    <div class="v num">${money(v.vendas)}<small>${o.reg ? 'às ' + esc(String(v.hora || '').slice(11, 16)) : int(v.ticket) + ' ticket' + (+v.ticket === 1 ? '' : 's')}</small></div>
   </button>`;
 }
 function motivoRow(m) {
@@ -1195,6 +1271,7 @@ VIEWS.registrar = (p) => {
         <label for="vLoja">Loja<span class="req">*</span></label>
         <select id="vLoja" required><option value="">Selecione a loja</option>${lojasAtivas.map(l => `<option value="${esc(l.IdLoja)}" ${l.IdLoja === lojaId ? 'selected' : ''}>${esc(l.NomeFantasia)} — LUC ${esc(l.Luc)}</option>`).join('')}</select>
       </div>
+      ${editing ? '' : `<button type="button" class="btn" data-act="naoAbriu" style="width:100%;color:var(--warn)">${ICON.note}A loja não abriu neste dia</button>`}
       <div id="dupBox"></div>
       <div class="field" id="fdVendas">
         <label for="vVendas">Vendas<span class="req">*</span></label>
@@ -1354,6 +1431,17 @@ function saveVenda() {
   replace('proxima', { salva: { loja: lj.NomeFantasia, data, vendas: cents / 100 }, prox: proximaPendente(loja, data, c.modo || 'dia') });
 }
 
+function naoAbriu() {
+  const c = cur().p;
+  const loja = $('#vLoja').value, data = $('#vData').value;
+  if (!loja) return fieldErr('fdLoja', 'Selecione a loja.');
+  if (!data || data > today()) return fieldErr('fdData', 'Informe uma data até hoje.');
+  if (merged().byLojaData.get(loja + '|' + data)) return toast('Já existe venda lançada para esta loja neste dia.');
+  enqueue({ type: 'motivo', motivo: { id: uid(), loja, motivo: `Loja não abriu em ${dBR(data)}`, data: data + ' 12:00:00' } });
+  const lj = lojaById(loja) || {};
+  replace('proxima', { salva: { loja: lj.NomeFantasia, data, naoAbriu: true }, prox: proximaPendente(loja, data, c.modo || 'dia') });
+}
+
 /* ---------- Depois de salvar: próxima loja da rota ---------- */
 VIEWS.proxima = (p) => {
   const sv = p.salva, nx = p.prox || {};
@@ -1361,7 +1449,7 @@ VIEWS.proxima = (p) => {
   const html = `
   ${topbar({ title: 'Venda salva', backBtn: true })}
   <main><div class="wrap gutter" style="display:grid;gap:16px;padding-block:20px">
-    <div class="alert ok"><div><b>${esc(sv.loja)}</b> · ${esc(dBR(sv.data))} · <b class="num">${money(sv.vendas)}</b><br>${off ? 'Salvo no aparelho. Será enviado quando houver internet.' : 'Salvo e enviado para a planilha.'}</div></div>
+    <div class="alert ${sv.naoAbriu ? 'warn' : 'ok'}"><div><b>${esc(sv.loja)}</b> · ${esc(dBR(sv.data))} · ${sv.naoAbriu ? '<b>não abriu</b> (registrado como motivo)' : `<b class="num">${money(sv.vendas)}</b>`}<br>${off ? 'Salvo no aparelho. Será enviado quando houver internet.' : 'Salvo e enviado para a planilha.'}</div></div>
     ${nx.loja ? `
     <h3 class="h2" style="margin:0">${nx.modo === 'dia' ? 'Próxima loja pendente' : nx.loja && sv.loja === nx.loja.NomeFantasia ? 'Próximo dia em atraso desta loja' : 'Próxima loja da rota'}</h3>
     <div class="card" style="padding:16px;display:grid;grid-template-columns:52px 1fr;gap:14px;align-items:center">
@@ -1418,6 +1506,13 @@ VIEWS.lojaForm = (p) => {
       ${f('Piso', 'Piso', 'list="dlPiso"')}${dl('Piso')}
       ${f('Contrato', 'Contrato', 'inputmode="numeric"')}
       ${f('ABL', 'ABL (m²)', 'inputmode="decimal"')}
+      <div class="field"><span class="label">Operação</span>
+        <div class="seg">${['Fixa', 'Eventual'].map(x => `<button type="button" data-segval="${x}" data-opform="1" aria-pressed="${(l.Operacao || 'Fixa') === x}">${x}</button>`).join('')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label class="field" style="gap:4px"><span style="font-size:13px;font-weight:700">Início (eventual)</span><input class="input" type="date" id="lInicio" value="${esc(l.Inicio || '')}"></label>
+          <label class="field" style="gap:4px"><span style="font-size:13px;font-weight:700">Fim (eventual)</span><input class="input" type="date" id="lFim" value="${esc(l.Fim || '')}"></label>
+        </div>
+        <div class="hint">Eventual (Mercado Produtor, feiras, eventos) só conta como pendente entre o início e o fim.</div></div>
       <div class="field"><span class="label">Aparece na rota diária?</span>
         <div class="seg">${['Sim', 'Não'].map(x => `<button type="button" data-segval="${x}" data-rotaval="1" aria-pressed="${(l.Rota || 'Sim') === x}">${x}</button>`).join('')}</div>
         <div class="hint">Use "Não" para lojas que o auditor não visita todos os dias. Elas continuam na lista de Lojas.</div></div>
@@ -1462,20 +1557,24 @@ VIEWS.historico = () => {
   let body = '';
   if (t === 'vendas') {
     const mes = S.ui.histMes || today().slice(0, 7);
+    const porReg = (S.ui.histOrdem || 'registro') === 'registro';
+    const chave = v => porReg ? String(v.hora || v.data).slice(0, 10) : v.data;
     ensureMes(mes);
+    if (porReg) ensureMes(addMonth(mes, -1));   // vendas registradas neste mês podem ser do mês anterior
     const busca = norm(S.ui.histBusca);
-    let list = merged().list.filter(v => v.data.startsWith(mes));
+    let list = merged().list.filter(v => chave(v).startsWith(mes));
     if (S.ui.histAud) list = list.filter(v => audNome(v.auditor) === S.ui.histAud);
     if (busca) list = list.filter(v => { const l = lojaById(v.loja); return norm((l ? l.NomeFantasia + ' ' + l.Luc : v.nome) + ' ' + v.resp).includes(busca); });
-    list.sort((a, b) => b.data.localeCompare(a.data) || String(b.hora).localeCompare(String(a.hora)));
+    list.sort((a, b) => porReg ? String(b.hora).localeCompare(String(a.hora)) : b.data.localeCompare(a.data) || String(b.hora).localeCompare(String(a.hora)));
     const tot = list.reduce((s, v) => s + (+v.vendas || 0), 0);
-    const auds = Array.from(new Set(merged().list.filter(v => v.data.startsWith(mes)).map(v => audNome(v.auditor)).filter(Boolean))).sort();
+    const auds = Array.from(new Set(merged().list.filter(v => chave(v).startsWith(mes)).map(v => audNome(v.auditor)).filter(Boolean))).sort();
     const groups = {};
-    list.forEach(v => { (groups[v.data] = groups[v.data] || []).push(v); });
+    list.forEach(v => { const k = chave(v); (groups[k] = groups[k] || []).push(v); });
     const lim = S.ui.histLim || 12;
     const keys = Object.keys(groups).sort().reverse();
     body = `
       <div class="gutter section" style="display:grid;gap:12px">
+        <div class="seg" role="group">${[['registro', 'Por registro'], ['data', 'Por data da venda']].map(([k, lb]) => `<button data-hordem="${k}" aria-pressed="${(S.ui.histOrdem || 'registro') === k}">${lb}</button>`).join('')}</div>
         <div class="month-nav">
           <button class="cal-nav" data-act="histMes" data-mes="${addMonth(mes, -1)}" aria-label="Mês anterior">${ICON.left}</button>
           <strong>${esc(mesNome(mes))}</strong>
@@ -1491,8 +1590,8 @@ VIEWS.historico = () => {
         </div>
       </div>
       ${S.loadingMes === mes ? '<div class="loading">Carregando ' + esc(mesNome(mes)) + '…</div>' : ''}
-      ${keys.slice(0, lim).map(k => `<div class="group-h"><span>${esc(diaLongo(k))}</span><span class="num">${money(groups[k].reduce((s, v) => s + (+v.vendas || 0), 0))}</span></div>
-        <div class="list">${groups[k].map(v => vendaRow(v)).join('')}</div>`).join('') || (S.loadingMes === mes ? '' : '<div class="empty">' + ICON.hist + '<div>Nenhum lançamento neste mês.</div></div>')}
+      ${keys.slice(0, lim).map(k => `<div class="group-h"><span>${porReg ? (k === today() ? 'Registradas hoje · ' : k === ontem() ? 'Registradas ontem · ' : 'Registradas em ') : 'Vendas de '}${esc(diaLongo(k))}</span><span class="num">${groups[k].length} · ${moneyShort(groups[k].reduce((s, v) => s + (+v.vendas || 0), 0))}</span></div>
+        <div class="list">${groups[k].map(v => vendaRow(v, { reg: porReg })).join('')}</div>`).join('') || (S.loadingMes === mes ? '' : '<div class="empty">' + ICON.hist + '<div>Nenhum lançamento neste mês.</div></div>')}
       ${keys.length > lim ? '<button class="more" data-act="histMais">Ver dias anteriores</button>' : ''}`;
   } else if (t === 'solic') {
     const all = solicAll().slice().sort((a, b) => (a.Status === 'Pendente' ? 0 : 1) - (b.Status === 'Pendente' ? 0 : 1) || String(b.DataPedido).localeCompare(String(a.DataPedido)));
@@ -1673,7 +1772,11 @@ VIEWS.painel = () => {
   const ativas = lojasAll().filter(l => l['Situação'] !== 'Inativo').length;
   const isAtual = mes === today().slice(0, 7);
   const diasCorridos = daysIn(mes);   // todos os dias do mês
-  const cobertura = ativas && diasCorridos ? Math.min(100, a.n / (ativas * diasCorridos) * 100) : 0;
+  // esperado = lojas fixas × dias do mês + eventuais só nos dias do período
+  let esperadas = 0, lancadasEsp = 0;
+  lojasAtivas().forEach(l => { const e = diasEsperadosNoMes(l, mes); esperadas += e; lancadasEsp += Math.min(e, ((d.mensal[mes] || {})[l.IdLoja] || [0, 0, 0])[2]); });
+  const cobertura = esperadas ? Math.min(100, lancadasEsp / esperadas * 100) : 0;
+  const nFixas = lojasAtivas().filter(l => !ehEventual(l)).length;
   // vendas por dia
   const nd = daysIn(mes);
   const dias = []; for (let i = 1; i <= nd; i++) { const k = mes + '-' + pad(i); dias.push({ k, v: (d.diario[k] || [0])[0], n: (d.diario[k] || [0, 0, 0])[2] }); }
@@ -1713,7 +1816,7 @@ VIEWS.painel = () => {
         <div class="kpi"><span class="l">Tickets</span><span class="v num">${int(a.t)}</span>${dl(a.t, pm.t, 'mês ant.')}</div>
         <div class="kpi"><span class="l">Ticket médio</span><span class="v num">${a.t ? money(a.v / a.t) : '—'}</span>${a.t && pm.t ? dl(a.v / a.t, pm.v / pm.t, 'mês ant.') : ''}</div>
         <div class="kpi"><span class="l">Lojas com venda</span><span class="v num">${a.lj}</span><span class="d muted">${ativas} lojas ativas</span></div>
-        <div class="kpi"><span class="l">Vendas diárias lançadas</span><span class="v num">${cobertura.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span><span class="d muted">${int(a.n)} de ${int(ativas * diasCorridos)} esperadas (${ativas} lojas × ${diasCorridos} dias)</span></div>
+        <div class="kpi"><span class="l">Vendas diárias lançadas</span><span class="v num">${cobertura.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span><span class="d muted">${int(lancadasEsp)} de ${int(esperadas)} esperadas (${nFixas} lojas fixas × ${diasCorridos} dias${esperadas > nFixas * diasCorridos ? ' + eventuais no período' : ''})</span></div>
       </div>
       ${isMaster() ? `<button class="btn" data-act="relatorio" data-mes="${mes}">${ICON.chart}Baixar relatório de ${esc(MESES[+mes.slice(5) - 1])} (Excel)</button>` : ''}
       ${isAtual ? '<div class="muted" style="font-size:12.5px">Dados da última sincronização' + (S.lastSync ? ' (' + new Date(S.lastSync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ')' : '') + '. Lançamentos ainda na fila entram após o envio.</div>' : ''}
@@ -2129,10 +2232,11 @@ function updateChrome(full) {
 
 /* ============================ Eventos ============================ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act],[data-tema],[data-jog],[data-paba],[data-rotatoggle],[data-gmes],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
+  const t = e.target.closest('[data-act],[data-hordem],[data-tema],[data-jog],[data-paba],[data-rotatoggle],[data-gmes],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.tab) return tab(d.tab);
+  if (d.hordem) { S.ui.histOrdem = d.hordem; S.ui.histLim = 12; return render(); }
   if (d.tema) { setTema(d.tema); $$('[data-tema]').forEach(b => b.setAttribute('aria-pressed', b === t)); return; }
   if (d.paba) { S.ui.painelAba = d.paba; render(); return window.scrollTo(0, 0); }
   if (d.gmes) { S.ui.gameMes = d.gmes; return refresh(); }
@@ -2178,6 +2282,21 @@ document.addEventListener('click', e => {
     case 'novoAud': return go('audForm', {});
     case 'saveAud': return saveAud(d.id);
     case 'rotaConfig': S.rotaEdit = {}; return go('rotaConfig');
+    case 'verEventuais': S.ui.filtro = 'eventuais'; return tab('lojas');
+    case 'naoAbriu': return naoAbriu();
+    case 'setOperacao': case 'salvarPeriodo': {
+      const l = lojaById(d.id); if (!l) return;
+      const loja = Object.assign({}, l); delete loja._pending;
+      if (d.act === 'setOperacao') { if ((ehEventual(l) ? 'Eventual' : 'Fixa') === d.op) return; loja.Operacao = d.op; }
+      else {
+        loja.Inicio = $('#opIni').value; loja.Fim = $('#opFim').value;
+        if (!loja.Inicio) return toast('Informe a data de início.');
+        if (loja.Fim && loja.Fim < loja.Inicio) return toast('O fim não pode ser antes do início.');
+      }
+      enqueue({ type: 'loja', loja, logo: '' });
+      toast(d.act === 'setOperacao' ? `Loja marcada como ${d.op.toLowerCase()}.` : 'Período salvo.');
+      return refresh();
+    }
     case 'recarregarLogos': S.logos = {}; persistLogos(); toast('Buscando os logos de novo…'); return loadLogos();
     case 'saveRota': return saveRota();
     case 'regras': return go('regras');
@@ -2216,6 +2335,8 @@ document.addEventListener('click', e => {
       const abl = val('ABL').replace(/\./g, '').replace(',', '.');
       base.ABL = abl === '' ? '' : +abl;
       { const rb = $('[data-rotaval][aria-pressed="true"]'); base.Rota = rb ? rb.dataset.segval : 'Sim'; }
+      { const ob = $('[data-opform][aria-pressed="true"]'); base.Operacao = ob ? ob.dataset.segval : 'Fixa'; base.Inicio = $('#lInicio').value; base.Fim = $('#lFim').value;
+        if (base.Inicio && base.Fim && base.Fim < base.Inicio) { toast('O fim não pode ser antes do início.'); return; } }
       base['Situação'] = ($('[data-sit][aria-pressed="true"]') || {}).dataset ? $('[data-sit][aria-pressed="true"]').dataset.sit : 'Ativo';
       delete base._pending;
       const item = { type: 'loja', loja: base, logo: S.newLogo || '' };
