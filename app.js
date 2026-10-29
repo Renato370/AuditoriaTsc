@@ -3,7 +3,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.3.2';
+const APP_VERSION = '1.3.3';
 const MIN_SERVER = '1.3.2';
 
 /* ============================ Utilidades ============================ */
@@ -1670,7 +1670,7 @@ VIEWS.painel = () => {
   const dl = (x, y, lab) => { const p = delta(x, y); return p == null ? '' : `<span class="d ${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${lab}</span>`; };
   const ativas = lojasAll().filter(l => l['Situação'] !== 'Inativo').length;
   const isAtual = mes === today().slice(0, 7);
-  const diasCorridos = isAtual ? +today().slice(8, 10) : daysIn(mes);
+  const diasCorridos = daysIn(mes);   // todos os dias do mês
   const cobertura = ativas && diasCorridos ? Math.min(100, a.n / (ativas * diasCorridos) * 100) : 0;
   // vendas por dia
   const nd = daysIn(mes);
@@ -1933,6 +1933,7 @@ VIEWS.login = () => {
         <div class="who">${auds.length ? auds.map(a => `<button data-who="${esc(a.nome)}" aria-pressed="${sel === a.nome}">${audAvatar(a.nome, 42)}${esc(a.nome)}</button>`).join('') : '<div class="loading">Carregando auditores…</div>'}</div></div>
       <div class="field" id="fdSenha"><label for="senha">Senha</label>
         <input class="input" id="senha" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Sua senha"></div>
+      ${S.avisoTroca ? '<div class="alert warn"><div>O app foi conectado a outra planilha. Entre de novo com a sua senha.</div></div>' : ''}
       <div id="loginErr"></div>
       <button class="btn primary" data-act="loginGo" style="min-height:52px">Entrar</button>
       ${!DEMO && !CFG.apiUrl ? '<button class="btn" data-act="resetUrl" style="border:0;background:none;color:var(--muted)">Trocar endereço do servidor</button>' : ''}
@@ -2055,6 +2056,7 @@ async function doLogin() {
   try {
     const r = await api('login', { auth: { nome, senha } }, { auth: false });
     S.user = { id: r.user.id, nome: r.user.nome, senha, perfil: r.user.perfil || 'Auditor' };
+    S.avisoTroca = false;
     await persist();
     S.stack = [{ v: 'rota', p: {} }];
     render();
@@ -2075,6 +2077,18 @@ async function logout(silent) {
   await persist();
   S.stack = [{ v: 'login', p: {} }];
   render(); loadAuditores();
+}
+
+/* Quando o app passa a usar outra planilha: limpa os dados guardados e pede login de novo.
+   O que estava na fila não é enviado automaticamente para a planilha nova. */
+async function trocouServidor() {
+  S.data = null; S.user = null; S.lastSync = 0; S.auditoresLogin = [];
+  S.vmap = new Map(); S.lojaFetched = new Set(); S.mesFetched = new Set();
+  S.queue.forEach(q => { q.error = 'Feito antes da troca de planilha. Envie para a planilha nova só se for um lançamento real; senão, descarte.'; q.retry = false; });
+  S.avisoTroca = true;
+  S.ver++;
+  try { await KV.set('auditores', null); } catch (e) { /* ok */ }
+  await persist();
 }
 
 /* ============================ Render ============================ */
@@ -2210,12 +2224,18 @@ document.addEventListener('click', e => {
     case 'retry': { const q = S.queue.find(x => x.qid === d.qid); if (q) { q.retry = true; q.error = ''; } return sync({ full: false, quiet: false }); }
     case 'logout': return logout(false);
     case 'install': if (S.installEvt) { S.installEvt.prompt(); S.installEvt = null; } return;
-    case 'saveUrl': S.apiUrl = $('#cfgUrl').value.trim(); persist(); toast('Endereço salvo.'); return sync({ full: true, quiet: false });
+    case 'saveUrl': {
+      const novo = $('#cfgUrl').value.trim();
+      if (novo === S.apiUrl) return toast('Endereço sem mudança.');
+      S.apiUrl = novo;
+      return trocouServidor().then(() => { S.stack = [{ v: 'login', p: {} }]; render(); loadAuditores(); });
+    }
     case 'setupGo': {
       const u = $('#setUrl').value.trim();
       if (!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(u)) { $('#setErr').innerHTML = '<div class="alert bad">O endereço deve começar com https://script.google.com/</div>'; return; }
-      S.apiUrl = u; persist();
-      S.stack = [{ v: 'login', p: {} }]; render(); return loadAuditores();
+      const mudou = S.apiUrl && S.apiUrl !== u;
+      S.apiUrl = u;
+      return (mudou ? trocouServidor() : persist()).then(() => { S.stack = [{ v: 'login', p: {} }]; render(); loadAuditores(); });
     }
     case 'resetUrl': S.stack = [{ v: 'setup', p: {} }]; return render();
     case 'loginGo': return doLogin();
@@ -2286,7 +2306,9 @@ setInterval(() => { if (S.user && S.queue.length) sync({ full: false }); }, 60e3
     S.lastSync = st.lastSync || 0;
     Object.assign(S.ui, st.ui || {});
   }
+  const urlAntes = S.apiUrl;
   if (CFG.apiUrl) S.apiUrl = CFG.apiUrl;
+  if (urlAntes && S.apiUrl && urlAntes !== S.apiUrl) await trocouServidor();
   rebuildFromData();
   if (!DEMO && !S.apiUrl) { S.stack = [{ v: 'setup', p: {} }]; return render(); }
   if (!S.user) { S.stack = [{ v: 'login', p: {} }]; render(); return loadAuditores(); }
