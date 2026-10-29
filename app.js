@@ -3,8 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.2.0';
-const MIN_SERVER = '1.2.0';
+const APP_VERSION = '1.3.0';
+const MIN_SERVER = '1.3.0';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -63,6 +63,7 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>',
   cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  route: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H16a3.5 3.5 0 0 0 0-7H8a3.5 3.5 0 0 1 0-7h7.5"/></svg>',
   mall: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8h12l1 13H5Z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>'
 };
 
@@ -381,14 +382,16 @@ async function ensureMes(m) {
 }
 
 /* ============================ Navegação ============================ */
+let refreshT = null;
 let histOk = true;
 function cur() { return S.stack[S.stack.length - 1]; }
 function go(v, p = {}) {
+  clearTimeout(refreshT);
   S.stack.push({ v, p });
   try { history.pushState({ d: S.stack.length }, ''); } catch (e) { histOk = false; }
   render(); window.scrollTo(0, 0);
 }
-function replace(v, p = {}) { S.stack[S.stack.length - 1] = { v, p }; render(); window.scrollTo(0, 0); }
+function replace(v, p = {}) { clearTimeout(refreshT); S.stack[S.stack.length - 1] = { v, p }; render(); window.scrollTo(0, 0); }
 function back() {
   if (S.stack.length <= 1) return;
   if (histOk) { try { history.back(); return; } catch (e) { /* segue */ } }
@@ -409,6 +412,26 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3200);
 }
+
+/* ============================ Marca, tema e configurações ============================ */
+const SELO = (c, s = 4) => `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="34" fill="none" stroke="${c}" stroke-width="${s}"/><path d="M32 55 Q39 47 46 46.5 Q50 46.3 51.5 43 Q54 37 55 29 Q56 23 58.5 23 Q61 23 61 29 Q61 45 64.5 58 Q66.5 66 61.5 66.5 Q57 67 56.5 61.5" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"/><path d="M29 67 Q47 56 71 60" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round"/></svg>`;
+const SHOP_LOGO = window.SHOP_LOGO || 'icons/shopping-logo.png';
+
+function temaAtual() { try { return localStorage.getItem('tema') || 'auto'; } catch (e) { return S.temaMem || 'auto'; } }
+function aplicarTema(t) {
+  const root = document.documentElement;
+  if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t); else root.removeAttribute('data-theme');
+  const escuro = t === 'dark' || (t !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  const m = document.querySelector('meta[name="theme-color"]'); if (m) m.setAttribute('content', escuro ? '#11392f' : '#17705c');
+}
+function setTema(t) { S.temaMem = t; try { if (t === 'auto') localStorage.removeItem('tema'); else localStorage.setItem('tema', t); } catch (e) { /* só nesta sessão */ } aplicarTema(t); }
+
+const CFG_PADRAO = { pts_prazo: 10, pts_atraso_curto: 5, pts_atraso_longo: 2, pts_motivo: 3, pts_correcao: -5, pts_exclusao: -10, pts_sequencia: 5, pts_conquista: 20, desafio_titulo: '', desafio_tipo: 'prazo', desafio_meta: 90, desafio_ate: '' };
+const cfg = k => (S.data && S.data.config && k in S.data.config) ? S.data.config[k] : CFG_PADRAO[k];
+const lojasRota = () => lojasAll().filter(l => l['Situação'] !== 'Inativo' && l.Rota !== 'Não');
+const naRota = l => l && l['Situação'] !== 'Inativo' && l.Rota !== 'Não';
+const addDias = (ymd, n) => { const d = new Date(ymd.slice(0, 10) + 'T12:00:00'); d.setDate(d.getDate() + n); return ymdOf(d); };
+const diasEntre = (a, b) => Math.round((Date.parse(a.slice(0, 10) + 'T12:00:00Z') - Date.parse(b.slice(0, 10) + 'T12:00:00Z')) / 864e5);
 
 /* ============================ Fotos dos auditores ============================ */
 function audInfo(nomeOuId) {
@@ -479,16 +502,21 @@ function diasAtrasados(lojaId, n) {
 }
 function lojasAtivas() { return lojasAll().filter(l => l['Situação'] !== 'Inativo'); }
 function proximaPendente(lojaId, data, modo) {
-  if (modo === 'atrasadas') {
-    const n = S.ui.atrasoDias || 7;
-    const mesma = diasAtrasados(lojaId, n);
-    if (mesma.length) return { loja: lojaById(lojaId), data: mesma[0], resta: mesma.length, modo };
-    const outras = lojasAtivas().map(l => ({ l, d: diasAtrasados(l.IdLoja, n) })).filter(x => x.d.length).sort((a, b) => ordemRota(a.l, b.l));
-    const total = outras.reduce((s, x) => s + x.d.length, 0);
-    return outras.length ? { loja: outras[0].l, data: outras[0].d[0], resta: total, modo } : { resta: 0, modo };
+  if (modo !== 'dia') {
+    // rota / atrasadas: termina os dias da mesma loja e segue para a próxima loja da rota
+    const n = modo === 'atrasadas' ? (S.ui.atrasoDias || 7) : 7;
+    const mesma = naRota(lojaById(lojaId)) ? diasAtrasados(lojaId, n) : [];
+    const ord = lojasRota().sort(ordemRota);
+    const todas = ord.map(l => ({ l, d: diasAtrasados(l.IdLoja, n) })).filter(x => x.d.length);
+    const total = todas.reduce((s, x) => s + x.d.length, 0);
+    if (mesma.length) return { loja: lojaById(lojaId), data: mesma[0], resta: total, modo };
+    if (!todas.length) return { resta: 0, modo };
+    const idx = ord.findIndex(l => l.IdLoja === lojaId);
+    const prox = todas.find(x => ord.indexOf(x.l) > idx) || todas[0];
+    return { loja: prox.l, data: prox.d[0], resta: total, modo };
   }
   const M = merged();
-  const ord = lojasAtivas().sort(ordemRota);
+  const ord = lojasRota().sort(ordemRota);
   const motDia = new Set(motivosAll().filter(m => m.data.slice(0, 10) === data).map(m => m.loja));
   const pend = ord.filter(l => !M.byLojaData.has(l.IdLoja + '|' + data) && !motDia.has(l.IdLoja));
   if (!pend.length) return { resta: 0, modo, data };
@@ -533,6 +561,7 @@ function topbar({ title, sub = '', backBtn = false, actions = '', search = '' })
     ${S.serverOld ? '<div class="demo-banner gutter">O código da planilha (Code.gs) está desatualizado. Atualize o Apps Script para a versão ' + MIN_SERVER + '.</div>' : ''}
     <div class="top-row gutter">
       ${backBtn ? `<button class="icon-btn" data-act="back" aria-label="Voltar">${ICON.back}</button>` : ''}
+      ${backBtn ? '' : `<span class="hdr-logo">${SELO('currentColor', 5)}</span>`}
       <h1>${esc(title)}${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</h1>
       ${actions}
       <button class="icon-btn${syncCls}" data-act="sync" id="syncBtn" aria-label="Sincronizar" title="${offline ? 'Sem internet' : 'Sincronizar'}">${offline ? ICON.cloudOff : ICON.sync}${pend ? `<span class="sync-dot">${pend}</span>` : ''}</button>
@@ -540,8 +569,8 @@ function topbar({ title, sub = '', backBtn = false, actions = '', search = '' })
 }
 
 function navbar(active) {
-  const it = [['lojas', 'Lojas', ICON.store], ['historico', 'Histórico', ICON.hist], ['painel', 'Painel', ICON.chart], ['mais', 'Conta', ICON.user]];
-  return `<nav class="nav">${it.map(([k, l, i]) => `<button data-tab="${k}" ${active === k ? 'aria-current="page"' : ''}>${i}<span>${l}</span></button>`).join('')}</nav>`;
+  const it = [['rota', 'Rota', ICON.route], ['lojas', 'Lojas', ICON.store], ['historico', 'Histórico', ICON.hist]].concat(isMaster() ? [['painel', 'Painel', ICON.chart]] : []).concat([['mais', 'Conta', ICON.user]]);
+  return `<nav class="nav" style="grid-template-columns:repeat(${it.length},1fr)">${it.map(([k, l, i]) => `<button data-tab="${k}" ${active === k ? 'aria-current="page"' : ''}>${i}<span>${l}</span></button>`).join('')}</nav>`;
 }
 
 function statusPill(kind) {
@@ -580,7 +609,7 @@ VIEWS.lojas = () => {
   const infos = ativas.map(l => ({ l, i: lojaInfo(l, ref) }));
   const lanc = infos.filter(x => x.i.kind === 'ok' || x.i.kind === 'pend').length;
   const nAtr = S.ui.atrasoDias || 7;
-  infos.forEach(x => { x.atr = x.l['Situação'] === 'Inativo' ? [] : diasAtrasados(x.l.IdLoja, nAtr); });
+  infos.forEach(x => { x.atr = naRota(x.l) ? diasAtrasados(x.l.IdLoja, nAtr) : []; });
   const atrLojas = infos.filter(x => x.atr.length).length;
   const atrDias = infos.reduce((s, x) => s + x.atr.length, 0);
   const modoAtr = S.ui.filtro === 'atrasadas';
@@ -637,7 +666,7 @@ VIEWS.lojas = () => {
       <div class="store" role="button" tabindex="0" data-loja="${esc(l.IdLoja)}">
         ${avatar(l)}
         <div class="store-main">
-          <div class="store-name">${esc(l.NomeFantasia)}${l['Situação'] === 'Inativo' ? ' <span class="badge">inativa</span>' : ''}</div>
+          <div class="store-name">${esc(l.NomeFantasia)}${l['Situação'] === 'Inativo' ? ' <span class="badge">inativa</span>' : l.Rota === 'Não' ? ' <span class="badge" style="background:var(--soft);color:var(--muted)">fora da rota</span>' : ''}</div>
           <div class="store-meta">LUC ${esc(l.Luc)} · ${esc(l.Piso || '—')} · ${esc(l.Segmento || l.Categoria || '')}</div>
           <div class="store-prog num"><span class="bar"><i style="width:${Math.round(i.dias / i.total * 100)}%"></i></span>${i.dias}/${i.total} dias · ${i.ultima ? 'coleta ' + esc(dShort(i.ultima) + ' ' + i.ultima.slice(11, 16)) : 'sem coleta'}</div>
         </div>
@@ -652,6 +681,312 @@ VIEWS.lojas = () => {
   ${navbar('lojas')}`;
   return { html };
 };
+
+/* ---------- Minha rota de hoje ---------- */
+VIEWS.rota = () => {
+  const ontemD = ontem();
+  const rl = lojasRota().sort(ordemRota);
+  const itens = rl.map(l => ({ l, d: diasAtrasados(l.IdLoja, 7) }));
+  const pend = itens.filter(x => x.d.length);
+  const ontemFeitas = itens.filter(x => !x.d.includes(ontemD)).length;
+  const atrasos = itens.reduce((s, x) => s + x.d.filter(k => k !== ontemD).length, 0);
+  const pct = rl.length ? Math.round(ontemFeitas / rl.length * 100) : 0;
+  const prox = pend[0];
+  const fora = lojasAtivas().length - rl.length;
+  const porPiso = {};
+  pend.forEach(x => { const p = x.l.Piso || 'Sem piso'; (porPiso[p] = porPiso[p] || []).push(x); });
+  const chipDias = ds => {
+    const o = ds.includes(ontemD) ? '<span class="status st-no">Ontem</span>' : '';
+    const outros = ds.filter(k => k !== ontemD);
+    return o + (outros.length ? `<span class="status st-mot">${outros.length === 1 ? dShort(outros[0]) : outros.length + ' atrasados'}</span>` : '');
+  };
+  const html = `
+  ${topbar({ title: 'Minha rota de hoje', sub: diaLongo(today()).replace(/^./, c => c.toUpperCase()) })}
+  <main><div class="wrap">
+    <div class="gutter section" style="display:grid;gap:12px">
+      ${isMaster() && solicAll().some(x => x.Status === 'Pendente') ? `<button class="alert warn" data-act="verSolic" style="border:0;text-align:left;width:100%"><div><b>Há solicitações de alteração</b> aguardando sua aprovação. Toque para ver.</div></button>` : ''}
+      <div class="card today">
+        <div class="today-head"><div class="today-big num">${ontemFeitas}<small> de ${rl.length} lojas com a venda de ontem</small></div></div>
+        <div class="bar"><i style="width:${pct}%"></i></div>
+        <div class="muted" style="font-size:13px">${atrasos ? `E mais <b>${atrasos}</b> lançamento${atrasos > 1 ? 's' : ''} em atraso nos últimos 7 dias.` : 'Nenhum atraso nos últimos 7 dias.'}</div>
+      </div>
+      ${prox ? `<button class="btn primary" style="min-height:64px;font-size:16.5px;display:grid;grid-template-columns:auto 1fr auto;text-align:left;gap:12px" data-act="proxRota" data-pl="${esc(prox.l.IdLoja)}" data-pd="${prox.d[0]}">
+        ${ICON.dollar}<span style="min-width:0"><span style="display:block">Lançar próxima loja</span><span style="display:block;font-weight:600;font-size:13.5px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(prox.l.NomeFantasia)} · ${esc(prox.l.Piso || '')} · venda de ${dShort(prox.d[0])}</span></span>${ICON.right}</button>`
+      : `<div class="alert ok"><div><b>Rota concluída.</b> Todas as lojas da rota estão em dia.</div></div>`}
+    </div>
+    ${Object.keys(porPiso).sort((a, b) => PISO_ORD(a) - PISO_ORD(b) || a.localeCompare(b)).map(p => `
+      <div class="group-h"><span>${esc(p)}</span><span>${porPiso[p].length} loja${porPiso[p].length > 1 ? 's' : ''}</span></div>
+      <div class="list">${porPiso[p].map(x => `<div class="store" role="button" tabindex="0" data-loja="${esc(x.l.IdLoja)}">
+        ${avatar(x.l)}
+        <div class="store-main"><div class="store-name">${esc(x.l.NomeFantasia)}</div><div class="store-meta">LUC ${esc(x.l.Luc)} · ${esc(x.l.Segmento || x.l.Categoria || '')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${chipDias(x.d)}</div></div>
+        <div class="store-side"><button class="quick" data-registrar="${esc(x.l.IdLoja)}" data-data="${x.d[0]}" data-modo="rota">+ Lançar ${dShort(x.d[0])}</button></div>
+      </div>`).join('')}</div>`).join('')}
+    <div class="gutter section" style="display:grid;gap:8px">
+      <div class="muted" style="font-size:12.5px">A rota mostra as lojas sem a venda de ontem e as que estão com dias em atraso (últimos 7 dias), na ordem de piso e LUC. Dias com motivo registrado não contam como atraso.${fora ? ` ${fora} loja${fora > 1 ? 's' : ''} fora da rota.` : ''}</div>
+      ${isMaster() ? `<button class="btn" data-act="rotaConfig">${ICON.route}Escolher lojas da rota</button>` : ''}
+    </div>
+  </div></main>
+  ${navbar('rota')}`;
+  return { html };
+};
+
+function rotaConfigResumo() {
+  const n = lojasAtivas().filter(l => (S.rotaEdit[l.IdLoja] || l.Rota || 'Sim') !== 'Não').length;
+  return `${n} de ${lojasAtivas().length} lojas na rota`;
+}
+VIEWS.rotaConfig = () => {
+  const ls = lojasAtivas().sort(ordemRota);
+  const grupos = {};
+  ls.forEach(l => { const p = l.Piso || 'Sem piso'; (grupos[p] = grupos[p] || []).push(l); });
+  const html = `
+  ${topbar({ title: 'Lojas da rota', backBtn: true })}
+  <main class="form-main"><div class="wrap">
+    <div class="gutter section"><div class="alert warn"><div>Desmarque as lojas que o auditor <b>não visita todos os dias</b>. Elas saem da rota diária e da contagem de atrasos, mas continuam na lista de Lojas e podem ser lançadas normalmente.</div></div>
+    <div style="font-weight:700;margin-top:12px" id="rotaCount">${rotaConfigResumo()}</div></div>
+    ${Object.keys(grupos).sort((a, b) => PISO_ORD(a) - PISO_ORD(b) || a.localeCompare(b)).map(p => `<div class="group-h"><span>${esc(p)}</span></div>
+      <div class="list">${grupos[p].map(l => `<label class="row" style="grid-template-columns:auto 1fr auto;cursor:pointer">${avatar(l, 38)}<div><div class="t">${esc(l.NomeFantasia)}</div><div class="s">LUC ${esc(l.Luc)} · ${esc(l.Tipo || '')}</div></div>
+        <input type="checkbox" class="switch" data-rotachk="${esc(l.IdLoja)}" ${(S.rotaEdit[l.IdLoja] || l.Rota || 'Sim') !== 'Não' ? 'checked' : ''} aria-label="${esc(l.NomeFantasia)} na rota"></label>`).join('')}</div>`).join('')}
+    <div class="gutter" id="rotaErr" style="padding-top:12px"></div>
+  </div></main>
+  <div class="formbar"><button class="btn" data-act="back">Cancelar</button><button class="btn primary" data-act="saveRota">${ICON.check}Salvar rota</button></div>`;
+  return { html, form: true };
+};
+async function saveRota() {
+  const mud = {};
+  Object.keys(S.rotaEdit || {}).forEach(id => { const l = lojaById(id); if (l && (l.Rota || 'Sim') !== S.rotaEdit[id]) mud[id] = S.rotaEdit[id]; });
+  if (!Object.keys(mud).length) return back();
+  if (!DEMO && !navigator.onLine) { $('#rotaErr').innerHTML = '<div class="alert bad">Alterar a rota precisa de internet.</div>'; return; }
+  const btn = $('[data-act="saveRota"]'); btn.disabled = true;
+  try {
+    const r = await api('salvarRota', { mudancas: mud });
+    if (S.data) S.data.lojas = r.lojas;
+    S.ver++; await persist();
+    toast('Rota atualizada.');
+    back();
+  } catch (e) { $('#rotaErr').innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; btn.disabled = false; }
+}
+
+/* ---------- Gamificação (por enquanto só o master vê) ---------- */
+const CONQUISTAS = [
+  { k: 'madrugador', ic: '🌅', nome: 'Madrugador', desc: '10 lançamentos antes das 11h no mesmo dia' },
+  { k: 'maofirme', ic: '✋', nome: 'Mão firme', desc: '30 lançamentos seguidos sem nenhuma correção aprovada' },
+  { k: 'rota', ic: '🗺️', nome: 'Rota completa', desc: 'Todas as lojas da rota de um piso (com 3 lojas ou mais) lançadas no mesmo dia' },
+  { k: 'zerou', ic: '🧹', nome: 'Zerou atrasadas', desc: 'Terminar um dia de trabalho sem nenhum atraso na rota nos últimos 7 dias' },
+  { k: 'maratona', ic: '🏃', nome: 'Maratonista', desc: '50 lançamentos no mesmo dia' },
+  { k: 'precisao', ic: '🎯', nome: 'Precisão 100%', desc: 'Fechar o mês com 100 lançamentos ou mais e nenhuma correção (conta quando o mês termina)' }
+];
+const REGRAS = [
+  ['prazo', 'pts_prazo', 'Venda lançada no prazo', 'até 1 dia depois da data da venda'],
+  ['curto', 'pts_atraso_curto', 'Venda lançada com 2 ou 3 dias de atraso', ''],
+  ['longo', 'pts_atraso_longo', 'Venda lançada com 4 dias ou mais de atraso', ''],
+  ['motivo', 'pts_motivo', 'Motivo registrado', 'quando a loja não passou a venda'],
+  ['correcao', 'pts_correcao', 'Correção aprovada em um lançamento seu', ''],
+  ['exclusao', 'pts_exclusao', 'Exclusão aprovada', 'lançamento indevido'],
+  ['sequencia', 'pts_sequencia', 'Dia de sequência, a partir do 3º dia', 'dia trabalhado em que a venda de ontem de todas as lojas da rota estava lançada'],
+  ['conquista', 'pts_conquista', 'Conquista desbloqueada', 'cada conquista conta uma vez por mês']
+];
+
+let gameCache = { key: '', val: null };
+function gamificacao(mes) {
+  const key = mes + '|' + S.ver + '|' + S.queue.length + '|' + JSON.stringify((S.data && S.data.config) || {}) + '|' + today();
+  if (gameCache.key === key) return gameCache.val;
+  const M = merged();
+  const rotaLs = lojasRota();
+  const hoje = today();
+  const reg = new Map();      // loja|data -> dia do primeiro registro
+  for (const v of M.list) { const k = v.loja + '|' + v.data; const h = String(v.hora || '').slice(0, 10) || v.data; if (!reg.has(k) || h < reg.get(k)) reg.set(k, h); }
+  const motReg = new Map();   // motivo registrado no dia X justifica X e X-1
+  for (const m of motivosAll()) { const d0 = m.data.slice(0, 10); [d0, addDias(d0, -1)].forEach(dd => { const k = m.loja + '|' + dd; if (!motReg.has(k) || d0 < motReg.get(k)) motReg.set(k, d0); }); }
+  const coberto = (id, dia, ate) => { const r = reg.get(id + '|' + dia); if (r && r <= ate) return true; const m = motReg.get(id + '|' + dia); return !!(m && m <= ate); };
+  const aprov = solicAll().filter(x => x.Status === 'Aprovada');
+  const corrigidas = new Set(aprov.map(x => x.VendaId));
+  const jog = {};
+  const J = n => jog[n] || (jog[n] = { nome: n, pts: 0, itens: { prazo: 0, curto: 0, longo: 0, motivo: 0, correcao: 0, exclusao: 0, sequencia: 0, conquista: 0 }, lanc: [], dias: new Set(), conq: {}, prog: {} });
+  for (const v of M.list) {
+    const h = String(v.hora || ''); if (!h.startsWith(mes)) continue;
+    const j = J(audNome(v.auditor) || '(sem auditor)'); j.lanc.push(v); j.dias.add(h.slice(0, 10));
+    const at = diasEntre(h, v.data);
+    if (at <= 1) j.itens.prazo++; else if (at <= 3) j.itens.curto++; else j.itens.longo++;
+  }
+  for (const m of motivosAll()) if (m.data.startsWith(mes)) J(audNome(m.auditor) || m.auditor).itens.motivo++;
+  for (const x of aprov) {
+    if (!String(x.DataResolucao || '').startsWith(mes)) continue;
+    const v = M.byId.get(x.VendaId) || S.vmap.get(x.VendaId);
+    J(v ? audNome(v.auditor) : x.Solicitante).itens[x.Tipo === 'Exclusão' ? 'exclusao' : 'correcao']++;
+  }
+  const porPiso = {};
+  rotaLs.forEach(l => { (porPiso[l.Piso || '—'] = porPiso[l.Piso || '—'] || []).push(l.IdLoja); });
+  const P = { prazo: 'pts_prazo', curto: 'pts_atraso_curto', longo: 'pts_atraso_longo', motivo: 'pts_motivo', correcao: 'pts_correcao', exclusao: 'pts_exclusao', sequencia: 'pts_sequencia', conquista: 'pts_conquista' };
+  for (const j of Object.values(jog)) {
+    const dias = Array.from(j.dias).sort();
+    let seq = 0, max = 0;
+    for (const D of dias) {
+      if (rotaLs.length && rotaLs.every(l => coberto(l.IdLoja, addDias(D, -1), D))) { seq++; if (seq >= 3) j.itens.sequencia++; } else seq = 0;
+      max = Math.max(max, seq);
+    }
+    j.seqAtual = seq; j.seqMax = max;
+    const porDia = {};
+    j.lanc.forEach(v => { const d0 = v.hora.slice(0, 10); (porDia[d0] = porDia[d0] || []).push(v); });
+    const cedo = Math.max(0, ...Object.values(porDia).map(a => a.filter(v => v.hora.slice(11, 13) < '11').length));
+    const maxDia = Math.max(0, ...Object.values(porDia).map(a => a.length));
+    let run = 0, best = 0;
+    j.lanc.slice().sort((a, b) => a.hora.localeCompare(b.hora)).forEach(v => { if (corrigidas.has(v.id)) run = 0; else { run++; best = Math.max(best, run); } });
+    let rotaOk = false, rotaBest = 0;
+    for (const arr of Object.values(porDia)) {
+      const grp = {};
+      arr.forEach(v => { const l = lojaById(v.loja); if (!l) return; const k = v.data + '|' + (l.Piso || '—'); (grp[k] = grp[k] || new Set()).add(v.loja); });
+      for (const [k, set] of Object.entries(grp)) {
+        const tot = porPiso[k.split('|')[1]] || [];
+        if (tot.length >= 3) { const c = tot.filter(id => set.has(id)).length; rotaBest = Math.max(rotaBest, c / tot.length); if (c === tot.length) rotaOk = true; }
+      }
+    }
+    let zer = false;
+    for (const D of dias) {
+      let falta = false;
+      for (let i = 1; i <= 7 && !falta; i++) { const dd = addDias(D, -i); for (const l of rotaLs) if (!coberto(l.IdLoja, dd, D)) { falta = true; break; } }
+      if (!falta && rotaLs.length) { zer = true; break; }
+    }
+    const corr = j.itens.correcao + j.itens.exclusao;
+    const fechado = mes < hoje.slice(0, 7);
+    j.conq = { madrugador: cedo >= 10, maofirme: best >= 30, rota: rotaOk, zerou: zer, maratona: maxDia >= 50, precisao: fechado && j.lanc.length >= 100 && corr === 0 };
+    j.prog = { madrugador: [cedo, 10], maofirme: [best, 30], rota: [Math.round(rotaBest * 100), 100], zerou: [zer ? 1 : 0, 1], maratona: [maxDia, 50], precisao: [corr ? 0 : j.lanc.length, 100] };
+    j.itens.conquista = Object.values(j.conq).filter(Boolean).length;
+    j.precisao = j.lanc.length ? Math.max(0, Math.round((1 - corr / j.lanc.length) * 1000) / 10) : null;
+    j.pontualidade = j.lanc.length ? Math.round(j.itens.prazo / j.lanc.length * 100) : null;
+    j.pts = Object.keys(P).reduce((t, k) => t + j.itens[k] * (+cfg(P[k]) || 0), 0);
+    j.hoje = (porDia[hoje] || []).length;
+  }
+  const lista = Object.values(jog).filter(j => j.lanc.length || j.itens.motivo || j.itens.correcao || j.itens.exclusao).sort((a, b) => b.pts - a.pts || b.lanc.length - a.lanc.length);
+  // equipe
+  const totLanc = lista.reduce((t, j) => t + j.lanc.length, 0);
+  const totPrazo = lista.reduce((t, j) => t + j.itens.prazo, 0);
+  const ontemD = ontem();
+  const ontemOk = rotaLs.filter(l => coberto(l.IdLoja, ontemD, hoje)).length;
+  const atrasosAgora = rotaLs.reduce((t, l) => t + diasAtrasados(l.IdLoja, 7).length, 0);
+  const val = { lista, totLanc, pctPrazo: totLanc ? Math.round(totPrazo / totLanc * 100) : 0, ontemOk, rotaTotal: rotaLs.length, atrasosAgora, P };
+  gameCache = { key, val };
+  return val;
+}
+
+function painelAbas() {
+  const a = S.ui.painelAba || 'vendas';
+  return `<div class="seg" role="group">${[['vendas', 'Vendas'], ['equipe', 'Equipe e pontos']].map(([k, l]) => `<button data-paba="${k}" aria-pressed="${a === k}">${l}</button>`).join('')}</div>`;
+}
+
+function desafioCard(g, mes) {
+  const t = String(cfg('desafio_titulo') || '').trim();
+  if (!t) return `<div class="card" style="padding:14px 16px;display:grid;gap:6px"><b>Desafio do mês</b><span class="muted" style="font-size:13.5px">Nenhum desafio definido. Crie um em Regras e pontuação.</span></div>`;
+  const tipo = cfg('desafio_tipo'), meta = +cfg('desafio_meta') || 0, ate = cfg('desafio_ate');
+  let atual, pct, txt;
+  if (tipo === 'atrasos') { atual = g.atrasosAgora; pct = atual === 0 ? 100 : Math.max(0, 100 - atual); txt = atual === 0 ? 'Meta atingida: nenhum atraso na rota.' : `Faltam ${atual} lançamento${atual > 1 ? 's' : ''} em atraso para zerar.`; }
+  else if (tipo === 'lancamentos') { atual = g.totLanc; pct = meta ? Math.min(100, atual / meta * 100) : 0; txt = `${int(atual)} de ${int(meta)} lançamentos no mês.`; }
+  else { atual = g.pctPrazo; pct = meta ? Math.min(100, atual / meta * 100) : 0; txt = `${atual}% dos lançamentos no prazo (meta: ${meta}%).`; }
+  return `<div class="card" style="padding:14px 16px;display:grid;gap:8px">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>🏁 ${esc(t)}</b>${ate ? `<span class="muted" style="font-size:12.5px">até ${esc(dBR(ate))}</span>` : ''}</div>
+    <div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div><span class="muted" style="font-size:13px">${esc(txt)}</span></div>`;
+}
+
+VIEWS.equipe = () => {
+  const mesAtual = today().slice(0, 7), mesAnt = addMonth(mesAtual, -1);
+  const mes = S.ui.gameMes === mesAnt ? mesAnt : mesAtual;
+  const g = gamificacao(mes);
+  const medalhas = j => CONQUISTAS.filter(c => j.conq[c.k]).map(c => `<span title="${esc(c.nome)}">${c.ic}</span>`).join('');
+  const html = `
+  ${topbar({ title: 'Painel', sub: 'Equipe e pontuação' })}
+  <main><div class="wrap">
+    <div class="gutter" style="padding-top:14px;display:grid;gap:12px">${painelAbas()}
+      <div class="alert warn" style="font-size:13px"><div>Só você (master) vê esta tela por enquanto. Os pontos são calculados com os dados da planilha.</div></div>
+      <div class="chips" style="padding-block:0">${[[mesAtual, 'Este mês'], [mesAnt, 'Mês passado']].map(([k, l]) => `<button class="chip" data-gmes="${k}" aria-pressed="${mes === k}">${l} · ${MESES[+k.slice(5) - 1]}</button>`).join('')}</div>
+      ${desafioCard(g, mes)}
+      ${mes === mesAtual ? `<div class="kpis">
+        <div class="kpi"><span class="l">Meta do dia</span><span class="v num">${g.ontemOk}/${g.rotaTotal}</span><span class="d muted">lojas da rota com a venda de ontem</span></div>
+        <div class="kpi"><span class="l">Atrasos na rota</span><span class="v num">${g.atrasosAgora}</span><span class="d muted">últimos 7 dias</span></div>
+      </div>` : ''}
+    </div>
+    <div class="section">
+      <h3 class="h2 gutter">Ranking de ${esc(MESES[+mes.slice(5) - 1])}</h3>
+      <div class="list">${g.lista.map((j, i) => `<button class="row" style="grid-template-columns:28px auto 1fr auto;gap:12px" data-jog="${esc(j.nome)}">
+        <span class="num" style="font-weight:800;font-size:18px;color:${i === 0 ? 'var(--warn)' : 'var(--muted)'}">${i + 1}º</span>
+        ${audAvatar(j.nome, 42)}
+        <div><div class="t">${esc(j.nome)} <span style="font-size:15px">${medalhas(j)}</span></div>
+        <div class="s">${j.lanc.length} lanç.${j.pontualidade != null ? ` · ${j.pontualidade}% no prazo` : ''}${j.precisao != null ? ` · precisão ${String(j.precisao).replace('.', ',')}%` : ''}${j.seqAtual >= 2 ? ` · 🔥 ${j.seqAtual} dias` : ''}${mes === mesAtual ? ` · hoje ${j.hoje}` : ''}</div></div>
+        <div class="v num" style="font-size:20px">${int(j.pts)}<small>pontos</small></div></button>`).join('') || '<div class="empty">Sem lançamentos neste mês.</div>'}</div>
+    </div>
+    <div class="gutter section"><button class="btn" style="width:100%" data-act="regras">${ICON.chart}Regras e pontuação</button></div>
+  </div></main>
+  ${navbar('painel')}`;
+  return { html };
+};
+
+VIEWS.jogador = (p) => {
+  const g = gamificacao(p.mes);
+  const j = g.lista.find(x => x.nome === p.nome);
+  if (!j) return { html: topbar({ title: 'Auditor', backBtn: true }) + '<main><div class="empty">Sem dados neste mês.</div></main>' };
+  const pos = g.lista.indexOf(j) + 1;
+  const html = `
+  ${topbar({ title: j.nome, sub: 'Desempenho de ' + mesNome(p.mes), backBtn: true })}
+  <main><div class="wrap">
+    <div class="gutter" style="display:flex;gap:16px;align-items:center;padding-block:18px">${audAvatar(j.nome, 72)}
+      <div><div class="num" style="font-size:34px;font-weight:800;line-height:1">${int(j.pts)} <span style="font-size:15px;color:var(--muted)">pontos</span></div>
+      <div class="muted">${pos}º lugar no ranking${j.seqAtual >= 2 ? ` · 🔥 ${j.seqAtual} dias de sequência` : ''}</div></div></div>
+    <div class="gutter"><div class="kpis">
+      <div class="kpi"><span class="l">Lançamentos</span><span class="v num">${j.lanc.length}</span></div>
+      <div class="kpi"><span class="l">Dias trabalhados</span><span class="v num">${j.dias.size}</span></div>
+      <div class="kpi"><span class="l">No prazo</span><span class="v num">${j.pontualidade == null ? '—' : j.pontualidade + '%'}</span></div>
+      <div class="kpi"><span class="l">Precisão</span><span class="v num">${j.precisao == null ? '—' : String(j.precisao).replace('.', ',') + '%'}</span></div>
+    </div></div>
+    <div class="section"><h3 class="h2 gutter">De onde vieram os pontos</h3>
+      <div class="list">${REGRAS.map(([k, ck, nome]) => { const q = j.itens[k], v = +cfg(ck) || 0; return `<div class="row" style="grid-template-columns:1fr auto"><div><div class="t" style="white-space:normal;font-weight:600">${esc(nome)}</div><div class="s">${q} × ${v > 0 ? '+' : ''}${v}</div></div><div class="v num ${q * v < 0 ? 'down' : q * v > 0 ? 'up' : ''}">${q * v > 0 ? '+' : ''}${int(q * v)}</div></div>`; }).join('')}
+      <div class="row" style="grid-template-columns:1fr auto"><div class="t">Total</div><div class="v num">${int(j.pts)}</div></div></div></div>
+    <div class="section"><h3 class="h2 gutter">Conquistas</h3>
+      <div class="list">${CONQUISTAS.map(c => { const [a, b] = j.prog[c.k] || [0, 1]; const ok = j.conq[c.k]; return `<div class="row" style="grid-template-columns:auto 1fr auto;gap:12px;${ok ? '' : 'opacity:.75'}"><span style="font-size:26px;${ok ? '' : 'filter:grayscale(1)'}">${c.ic}</span>
+        <div><div class="t">${esc(c.nome)}</div><div class="s" style="white-space:normal">${esc(c.desc)}</div>${ok ? '' : `<div class="bar" style="height:5px;margin-top:6px"><i style="width:${Math.min(100, a / b * 100).toFixed(0)}%"></i></div>`}</div>
+        <div class="v">${ok ? '<span class="status st-ok">Conquistada</span>' : `<span class="muted num" style="font-size:12.5px">${c.k === 'rota' ? a + '%' : c.k === 'zerou' ? '' : Math.min(a, b) + '/' + b}</span>`}</div></div>`; }).join('')}</div></div>
+  </div></main>`;
+  return { html };
+};
+
+VIEWS.regras = () => {
+  const m = isMaster();
+  const html = `
+  ${topbar({ title: 'Regras e pontuação', backBtn: true })}
+  <main class="${m ? 'form-main' : ''}"><div class="wrap">
+    <div class="gutter section muted" style="font-size:13.5px">Cada auditor soma pontos no mês pelo que faz no app. O ranking zera no início de cada mês. Os pontos valem também para os lançamentos antigos, então ao mudar um valor tudo é recalculado.</div>
+    <div class="section"><h3 class="h2 gutter">O que vale pontos</h3>
+      <div class="list">${REGRAS.map(([k, ck, nome, det]) => `<div class="row" style="grid-template-columns:1fr auto;gap:12px"><div><div class="t" style="white-space:normal;font-weight:600">${esc(nome)}</div>${det ? `<div class="s" style="white-space:normal">${esc(det)}</div>` : ''}</div>
+        ${m ? `<input class="input num" data-cfg="${ck}" value="${esc(cfg(ck))}" inputmode="numeric" style="width:84px;min-height:44px;text-align:center;font-weight:800;padding:8px">` : `<b class="num ${+cfg(ck) < 0 ? 'down' : 'up'}">${+cfg(ck) > 0 ? '+' : ''}${cfg(ck)}</b>`}</div>`).join('')}</div>
+      ${m ? '<div class="gutter hint muted" style="font-size:12.5px;margin-top:6px">Use número negativo para tirar pontos (ex.: -5).</div>' : ''}</div>
+    <div class="section"><h3 class="h2 gutter">Conquistas (${cfg('pts_conquista') > 0 ? '+' : ''}${cfg('pts_conquista')} cada)</h3>
+      <div class="list">${CONQUISTAS.map(c => `<div class="row" style="grid-template-columns:auto 1fr;gap:12px"><span style="font-size:24px">${c.ic}</span><div><div class="t">${esc(c.nome)}</div><div class="s" style="white-space:normal">${esc(c.desc)}</div></div></div>`).join('')}</div></div>
+    ${m ? `<div class="gutter section"><h3 class="h2">Desafio do mês</h3>
+      <div class="fields" style="padding-block:4px">
+        <div class="field"><label for="dTit">Título</label><input class="input" id="dTit" value="${esc(cfg('desafio_titulo'))}" placeholder="Ex.: Zerar os atrasos do L3"></div>
+        <div class="field"><label for="dTipo">Como medir</label><select id="dTipo">${[['prazo', '% dos lançamentos no prazo'], ['lancamentos', 'Número de lançamentos da equipe no mês'], ['atrasos', 'Zerar os atrasos da rota (últimos 7 dias)']].map(([k, l]) => `<option value="${k}" ${cfg('desafio_tipo') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="dMeta">Meta</label><input class="input num" id="dMeta" inputmode="numeric" value="${esc(cfg('desafio_meta'))}"><div class="hint">Para "% no prazo", use a porcentagem (ex.: 90). Para "zerar atrasos", a meta é ignorada.</div></div>
+        <div class="field"><label for="dAte">Prazo final</label><input class="input" type="date" id="dAte" value="${esc(cfg('desafio_ate'))}"></div>
+        <div class="hint">Deixe o título em branco para não ter desafio.</div>
+      </div><div id="regErr"></div></div>` : ''}
+  </div></main>
+  ${m ? `<div class="formbar"><button class="btn" data-act="back">Cancelar</button><button class="btn primary" data-act="saveRegras">${ICON.check}Salvar regras</button></div>` : ''}`;
+  return { html, form: m };
+};
+async function saveRegras() {
+  if (!DEMO && !navigator.onLine) { $('#regErr').innerHTML = '<div class="alert bad">Alterar as regras precisa de internet.</div>'; return; }
+  const valores = {};
+  let erro = '';
+  $$('[data-cfg]').forEach(i => { const v = i.value.trim().replace(',', '.'); if (!/^-?\d+(\.\d+)?$/.test(v)) erro = 'Use apenas números nos pontos.'; valores[i.dataset.cfg] = +v; });
+  if (erro) { $('#regErr').innerHTML = `<div class="alert bad">${erro}</div>`; return; }
+  Object.assign(valores, { desafio_titulo: $('#dTit').value.trim(), desafio_tipo: $('#dTipo').value, desafio_meta: +($('#dMeta').value || 0), desafio_ate: $('#dAte').value });
+  const btn = $('[data-act="saveRegras"]'); btn.disabled = true;
+  try {
+    const r = await api('salvarConfig', { valores });
+    if (S.data) S.data.config = r.config;
+    S.ver++; await persist();
+    toast('Regras salvas. Pontos recalculados.');
+    back();
+  } catch (e) { $('#regErr').innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; btn.disabled = false; }
+}
 
 /* ---------- Detalhe da loja ---------- */
 VIEWS.loja = (p) => {
@@ -848,7 +1183,7 @@ VIEWS.registrar = (p) => {
       <div class="field" id="fdTicket">
         <label for="vTicket">Ticket<span class="req">*</span></label>
         <div class="stepper">
-          <input class="input num" id="vTicket" type="number" inputmode="numeric" min="0" step="1" value="${editing ? esc(editing.ticket) : ''}" placeholder="0">
+          <input class="input num" id="vTicket" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" value="${editing ? esc(Math.round(+editing.ticket)) : ''}" placeholder="0">
           <button type="button" data-step="-1" aria-label="Diminuir">−</button>
           <button type="button" data-step="1" aria-label="Aumentar">+</button>
         </div>
@@ -857,6 +1192,7 @@ VIEWS.registrar = (p) => {
       <div class="field" id="fdResp">
         <label for="vResp">Responsável<span class="req">*</span></label>
         <input class="input" id="vResp" autocomplete="off" autocapitalize="words" value="${esc(editing ? editing.resp : '')}" placeholder="Nome de quem informou">
+        <div class="hint" id="respHint"></div>
         <div class="sugs" id="respSugs"></div>
       </div>
       <div class="field" id="fdSig">
@@ -898,9 +1234,18 @@ VIEWS.registrar = (p) => {
         const ex = lj && dt ? merged().byLojaData.get(lj + '|' + dt) : null;
         $('#dupBox').innerHTML = ex && (!editing || ex.id !== editing.id)
           ? `<div class="alert warn"><div>Já existe lançamento desta loja em ${esc(dBR(dt))}: <b>${money(ex.vendas)}</b>.</div><button type="button" data-venda="${esc(ex.id)}">Abrir lançamento existente</button></div>` : '';
+        // responsáveis usados recentemente nesta loja (mais recente primeiro)
+        const locais = merged().list.filter(v => v.loja === lj && v.resp).sort((a, b) => String(b.hora).localeCompare(String(a.hora))).map(v => String(v.resp).trim());
         const resps = (S.data && S.data.responsaveis[lj]) || [];
-        const sug = Array.from(new Set(resps.concat([S.user.nome]))).slice(0, 7);
+        const sug = Array.from(new Set(locais.concat(resps).filter(Boolean))).slice(0, 6);
+        if (!sug.includes(S.user.nome)) sug.push(S.user.nome);
         $('#respSugs').innerHTML = sug.map(n => `<button type="button" data-resp="${esc(n)}">${esc(n)}</button>`).join('');
+        const fr = $('#vResp');
+        if (!editing && (fr.value === '' || fr.dataset.auto === '1')) {
+          fr.value = lj && sug.length > 1 ? sug[0] : '';
+          fr.dataset.auto = fr.value ? '1' : '';
+        }
+        $('#respHint').textContent = fr.dataset.auto === '1' ? 'Último responsável desta loja. Se foi outra pessoa, toque em outro nome ou digite.' : '';
       };
       $('#vLoja').addEventListener('change', upd);
       $('#vData').addEventListener('change', upd);
@@ -952,6 +1297,7 @@ function fieldErr(id, msg) {
 }
 
 function saveVenda() {
+  if (S.salvando) return;
   const c = cur().p;
   const editing = c.edit ? merged().byId.get(c.edit) : null;
   const data = $('#vData').value, loja = $('#vLoja').value, cents = S.getCents(), ticket = $('#vTicket').value, resp = $('#vResp').value.trim();
@@ -960,7 +1306,7 @@ function saveVenda() {
   chk('fdData', data && data <= today(), 'Informe uma data até hoje.');
   chk('fdLoja', !!loja, 'Selecione a loja.');
   chk('fdVendas', cents != null, 'Informe o valor das vendas.');
-  chk('fdTicket', ticket !== '' && +ticket >= 0 && Number.isInteger(+ticket), 'Informe a quantidade de tickets.');
+  chk('fdTicket', /^\d+$/.test(ticket), 'Informe a quantidade de tickets (número inteiro, sem vírgula).');
   chk('fdResp', !!resp, 'Informe o responsável.');
   chk('fdSig', editing || S.sigPad.hasInk(), 'Peça a assinatura do responsável.');
   const ex = loja && data ? merged().byLojaData.get(loja + '|' + data) : null;
@@ -972,6 +1318,7 @@ function saveVenda() {
     $('#outBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
+  S.salvando = true; setTimeout(() => { S.salvando = false; }, 1200);
   const venda = { VendaId: editing ? editing.id : uid(), Data: data, Loja: loja, Vendas: cents / 100, Ticket: +ticket, Responsavel: resp, HoraRegistro: new Date().toISOString() };
   const assinatura = S.sigPad.hasInk() ? S.sigPad.toDataURL() : '';
   // se já havia na fila uma versão não enviada, substitui
@@ -995,15 +1342,15 @@ VIEWS.proxima = (p) => {
   <main><div class="wrap gutter" style="display:grid;gap:16px;padding-block:20px">
     <div class="alert ok"><div><b>${esc(sv.loja)}</b> · ${esc(dBR(sv.data))} · <b class="num">${money(sv.vendas)}</b><br>${off ? 'Salvo no aparelho. Será enviado quando houver internet.' : 'Salvo e enviado para a planilha.'}</div></div>
     ${nx.loja ? `
-    <h3 class="h2" style="margin:0">${nx.modo === 'atrasadas' ? 'Próximo dia em atraso' : 'Próxima loja pendente'}</h3>
+    <h3 class="h2" style="margin:0">${nx.modo === 'dia' ? 'Próxima loja pendente' : nx.loja && sv.loja === nx.loja.NomeFantasia ? 'Próximo dia em atraso desta loja' : 'Próxima loja da rota'}</h3>
     <div class="card" style="padding:16px;display:grid;grid-template-columns:52px 1fr;gap:14px;align-items:center">
       ${avatar(nx.loja, 52)}
       <div style="min-width:0"><div style="font-weight:800;font-size:18px">${esc(nx.loja.NomeFantasia)}</div>
       <div class="muted" style="font-size:13.5px">LUC ${esc(nx.loja.Luc)} · ${esc(nx.loja.Piso || '—')} · venda de ${esc(dBR(nx.data))}</div></div>
     </div>
     <button class="btn primary" style="min-height:56px;font-size:16px" data-registrar="${esc(nx.loja.IdLoja)}" data-data="${nx.data}" data-modo="${nx.modo}">${ICON.dollar}Lançar ${esc(nx.loja.NomeFantasia)}</button>
-    <div class="muted" style="font-size:13px;text-align:center">${nx.modo === 'atrasadas' ? `Faltam ${nx.resta} dia${nx.resta > 1 ? 's' : ''} em atraso no total.` : `Faltam ${nx.resta} loja${nx.resta > 1 ? 's' : ''} para ${esc(dBR(nx.data))}, na ordem de piso e LUC.`}</div>`
-    : `<div class="empty" style="padding:24px">${ICON.check}<div style="font-weight:700;color:var(--fg)">${nx.modo === 'atrasadas' ? 'Nenhum dia em atraso.' : 'Todas as lojas lançadas para ' + esc(dBR(nx.data || sv.data)) + '.'}</div></div>`}
+    <div class="muted" style="font-size:13px;text-align:center">${nx.modo !== 'dia' ? `Faltam ${nx.resta} lançamento${nx.resta > 1 ? 's' : ''} na rota (ontem e atrasados).` : `Faltam ${nx.resta} loja${nx.resta > 1 ? 's' : ''} para ${esc(dBR(nx.data))}, na ordem de piso e LUC.`}</div>`
+    : `<div class="empty" style="padding:24px">${ICON.check}<div style="font-weight:700;color:var(--fg)">${nx.modo !== 'dia' ? 'Rota concluída. Nenhuma loja pendente.' : 'Todas as lojas lançadas para ' + esc(dBR(nx.data || sv.data)) + '.'}</div></div>`}
     <button class="btn" data-act="back">Voltar para a lista</button>
   </div></main>`;
   return { html };
@@ -1050,6 +1397,9 @@ VIEWS.lojaForm = (p) => {
       ${f('Piso', 'Piso', 'list="dlPiso"')}${dl('Piso')}
       ${f('Contrato', 'Contrato', 'inputmode="numeric"')}
       ${f('ABL', 'ABL (m²)', 'inputmode="decimal"')}
+      <div class="field"><span class="label">Aparece na rota diária?</span>
+        <div class="seg">${['Sim', 'Não'].map(x => `<button type="button" data-segval="${x}" data-rotaval="1" aria-pressed="${(l.Rota || 'Sim') === x}">${x}</button>`).join('')}</div>
+        <div class="hint">Use "Não" para lojas que o auditor não visita todos os dias. Elas continuam na lista de Lojas.</div></div>
       <div class="field"><span class="label">Situação</span>
         <div class="seg" id="lSit">${['Ativo', 'Inativo'].map(s => `<button type="button" data-sit="${s}" aria-pressed="${(l['Situação'] || 'Ativo') === s}">${s}</button>`).join('')}</div></div>
     </div>
@@ -1191,7 +1541,7 @@ VIEWS.pedir = (p) => {
         <div class="field" id="fdPVendas"><label for="pVendas">Valor correto das vendas</label>
           <input class="input money num" id="pVendas" inputmode="numeric" value="${money(v.vendas)}"></div>
         <div class="field" id="fdPTicket"><label for="pTicket">Ticket correto</label>
-          <input class="input num" id="pTicket" type="number" inputmode="numeric" min="0" value="${esc(v.ticket)}"></div>
+          <input class="input num" id="pTicket" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" value="${esc(Math.round(+v.ticket))}"></div>
         <div class="field"><label for="pResp">Responsável correto</label>
           <input class="input" id="pResp" value="${esc(v.resp || '')}"></div>
         <div id="pDup"></div>
@@ -1225,7 +1575,7 @@ function enviarPedido(id) {
     const cents = S.getPCents();
     if (cents == null) { fieldErr('fdPVendas', 'Informe o valor.'); return; }
     const tk = $('#pTicket').value;
-    if (tk === '' || +tk < 0) { fieldErr('fdPTicket', 'Informe o ticket.'); return; }
+    if (!/^\d+$/.test(tk)) { fieldErr('fdPTicket', 'Informe o ticket (número inteiro).'); return; }
     Object.assign(solic, { NovaData: $('#pData').value || v.data, NovasVendas: cents / 100, NovoTicket: +tk, NovoResponsavel: $('#pResp').value.trim() || v.resp });
     if (resumoSolic(solic) === 'sem mudanças') { toast('Altere pelo menos um campo, ou escolha "Excluir lançamento".'); return; }
   }
@@ -1283,7 +1633,9 @@ async function resolver(id, aprovar) {
 /* ---------- Painel ---------- */
 VIEWS.painel = () => {
   const d = S.data;
+  if (!isMaster()) return VIEWS.rota();
   if (!d) return { html: topbar({ title: 'Painel' }) + '<main><div class="loading">Carregando…</div></main>' + navbar('painel') };
+  if (S.ui.painelAba === 'equipe') return VIEWS.equipe();
   const meses = Object.keys(d.mensal).sort();
   const mes = S.ui.painelMes || today().slice(0, 7);
   const sum = m => { const o = d.mensal[m] || {}; let v = 0, t = 0, n = 0, lj = 0; for (const k in o) { v += o[k][0]; t += o[k][1]; n += o[k][2]; lj++; } return { v, t, n, lj }; };
@@ -1328,6 +1680,7 @@ VIEWS.painel = () => {
   const html = `
   ${topbar({ title: 'Painel', sub: 'Vendas declaradas pelas lojas' })}
   <main><div class="wrap">
+    <div class="gutter" style="padding-top:14px">${painelAbas()}</div>
     <div class="gutter section" style="display:grid;gap:12px">
       <div class="month-nav">
         <button class="cal-nav" data-act="painelMes" data-mes="${addMonth(mes, -1)}" ${meses.length && mes <= meses[0] ? 'disabled' : ''} aria-label="Mês anterior">${ICON.left}</button>
@@ -1515,9 +1868,16 @@ VIEWS.mais = () => {
       <h3 class="h2" style="margin:0">Cadastros</h3>
       <button class="btn" style="width:100%" data-act="auditores">${ICON.user}Auditores: nome, senha, foto e perfil</button>
       <button class="btn" style="width:100%" data-act="novaLoja">${ICON.plus}Cadastrar nova loja</button>
+      <button class="btn" style="width:100%" data-act="rotaConfig">${ICON.route}Lojas da rota diária</button>
+      <button class="btn" style="width:100%" data-act="regras">${ICON.chart}Regras e pontuação da equipe</button>
     </div>` : ''}
     ${S.installEvt ? `<div class="gutter section"><h3 class="h2">Aplicativo</h3><button class="btn primary" style="width:100%" data-act="install">Instalar na tela inicial</button></div>` : ''}
     <div class="gutter section">
+      <h3 class="h2">Aparência</h3>
+      <div class="seg" role="group" aria-label="Tema">${[['auto', 'Automático'], ['light', 'Claro'], ['dark', 'Escuro']].map(([k, l]) => `<button data-tema="${k}" aria-pressed="${temaAtual() === k}">${l}</button>`).join('')}</div>
+      <div class="hint muted" style="font-size:12.5px;margin-top:8px">Automático segue o tema do celular.</div>
+    </div>
+    ${!isMaster() ? `<div class="gutter muted" style="font-size:12.5px;padding-block:8px 20px">Versão ${APP_VERSION}</div>` : `<div class="gutter section">
       <h3 class="h2">Servidor</h3>
       <div class="card" style="padding:16px;display:grid;gap:10px">
         ${DEMO ? '<div class="muted">Modo demonstração: os dados ficam só nesta página.</div>' : `
@@ -1526,7 +1886,7 @@ VIEWS.mais = () => {
         ${CFG.apiUrl ? '<div class="hint muted" style="font-size:12.5px">Definido no arquivo config.js.</div>' : '<button class="btn" data-act="saveUrl">Salvar endereço</button>'}`}
         <div class="muted" style="font-size:12.5px">Versão ${APP_VERSION}${S.data && S.data.version ? ' · servidor ' + esc(S.data.version) : ''}</div>
       </div>
-    </div>
+    </div>`}
   </div></main>
   ${navbar('mais')}`;
   return { html };
@@ -1535,7 +1895,7 @@ VIEWS.mais = () => {
 /* ---------- Login e configuração ---------- */
 VIEWS.setup = () => ({
   html: `<main><div class="login gutter">
-    <div class="brand-mark"><span class="logo">${ICON.mall}</span><h1>Auditoria de Vendas</h1><div class="muted">Primeiro acesso neste aparelho</div></div>
+    <div class="brand-mark"><span class="logo">${SELO('#fff', 4)}</span><h1>Auditoria de Vendas</h1><img class="shop-logo" src="${SHOP_LOGO}" alt="Teresópolis Shopping"><div class="muted">Primeiro acesso neste aparelho</div></div>
     <div class="field"><label for="setUrl">Endereço do App da Web</label>
       <input class="input" id="setUrl" placeholder="https://script.google.com/macros/s/…/exec" style="font-size:14px" value="${esc(S.apiUrl)}">
       <div class="hint">Copie o endereço que o Apps Script mostrou ao publicar (termina em /exec).</div></div>
@@ -1549,7 +1909,7 @@ VIEWS.login = () => {
   const sel = S.ui.loginSel || '';
   return {
     html: `<main>${DEMO ? '<div class="demo-banner gutter">Demonstração com dados de exemplo — senha de todos: 1234 · Renato é o master</div>' : ''}<div class="login gutter">
-      <div class="brand-mark"><span class="logo">${ICON.mall}</span><h1>Auditoria de Vendas</h1><div class="muted">${esc(CFG.nomeShopping || '')}</div></div>
+      <div class="brand-mark"><span class="logo">${SELO('#fff', 4)}</span><h1>Auditoria de Vendas</h1><img class="shop-logo" src="${SHOP_LOGO}" alt="${esc(CFG.nomeShopping || 'Teresópolis Shopping')}"></div>
       <div class="field"><span class="label">Quem está usando?</span>
         <div class="who">${auds.length ? auds.map(a => `<button data-who="${esc(a.nome)}" aria-pressed="${sel === a.nome}">${audAvatar(a.nome, 42)}${esc(a.nome)}</button>`).join('') : '<div class="loading">Carregando auditores…</div>'}</div></div>
       <div class="field" id="fdSenha"><label for="senha">Senha</label>
@@ -1677,7 +2037,7 @@ async function doLogin() {
     const r = await api('login', { auth: { nome, senha } }, { auth: false });
     S.user = { id: r.user.id, nome: r.user.nome, senha, perfil: r.user.perfil || 'Auditor' };
     await persist();
-    S.stack = [{ v: 'lojas', p: {} }];
+    S.stack = [{ v: 'rota', p: {} }];
     render();
     toast('Olá, ' + S.user.nome.split(' ')[0] + '! Carregando lojas…');
     await sync({ full: true, quiet: false });
@@ -1702,7 +2062,7 @@ async function logout(silent) {
 let current = null;
 function render() {
   const c = cur();
-  const fn = VIEWS[c.v] || VIEWS.lojas;
+  const fn = VIEWS[c.v] || VIEWS.rota;
   current = fn(c.p) || {};
   const app = $('#app');
   // preserva a busca focada ao redesenhar
@@ -1715,12 +2075,12 @@ function render() {
   if (current.mount) current.mount();
 }
 /* Redesenha só se não houver formulário aberto (para não perder o que está sendo digitado) */
-let refreshT = null;
 function refresh(soft) {
   if (current && current.form) { updateChrome(); return; }
   clearTimeout(refreshT);
   refreshT = setTimeout(() => {
-    const y = window.scrollY; render(); if (soft || true) window.scrollTo(0, y);
+    if (current && current.form) return updateChrome();   // um formulário abriu nesse meio-tempo
+    const y = window.scrollY; render(); window.scrollTo(0, y);
   }, soft ? 250 : 0);
 }
 function updateChrome(full) {
@@ -1733,10 +2093,14 @@ function updateChrome(full) {
 
 /* ============================ Eventos ============================ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
+  const t = e.target.closest('[data-act],[data-tema],[data-jog],[data-paba],[data-rotatoggle],[data-gmes],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.tab) return tab(d.tab);
+  if (d.tema) { setTema(d.tema); $$('[data-tema]').forEach(b => b.setAttribute('aria-pressed', b === t)); return; }
+  if (d.paba) { S.ui.painelAba = d.paba; render(); return window.scrollTo(0, 0); }
+  if (d.gmes) { S.ui.gameMes = d.gmes; return refresh(); }
+  if (d.jog) return go('jogador', { nome: d.jog, mes: S.ui.gameMes || today().slice(0, 7) });
   if (d.solic) return go('solic', { id: d.solic });
   if (d.aud) return go('audForm', { id: d.aud });
   if (d.segval) { $$('[data-segval]', t.parentNode).forEach(b => b.setAttribute('aria-pressed', b === t)); return; }
@@ -1751,7 +2115,7 @@ document.addEventListener('click', e => {
   if (d.filtro) { S.ui.filtro = d.filtro; persist(); return render(); }
   if (d.htab) { S.ui.histTab = d.htab; return render(); }
   if (d.rank) { S.ui.rankBy = d.rank; return refresh(); }
-  if (d.resp) { $('#vResp').value = d.resp; fieldErr('fdResp', ''); return; }
+  if (d.resp) { const r = $('#vResp'); r.value = d.resp; r.dataset.auto = ''; $('#respHint').textContent = ''; fieldErr('fdResp', ''); return; }
   if (d.mot) { const ta = $('#mTxt'); ta.value = ta.value ? ta.value + '. ' + d.mot : d.mot; return; }
   if (d.step) { const i = $('#vTicket'); i.value = Math.max(0, (+i.value || 0) + +d.step); i.dispatchEvent(new Event('input')); return; }
   if (d.who) { S.ui.loginSel = d.who; $$('[data-who]').forEach(b => b.setAttribute('aria-pressed', b.dataset.who === d.who)); $('#senha').focus(); return; }
@@ -1777,6 +2141,11 @@ document.addEventListener('click', e => {
     case 'auditores': S.audList = null; S.audErr = ''; return go('auditores');
     case 'novoAud': return go('audForm', {});
     case 'saveAud': return saveAud(d.id);
+    case 'rotaConfig': S.rotaEdit = {}; return go('rotaConfig');
+    case 'saveRota': return saveRota();
+    case 'regras': return go('regras');
+    case 'saveRegras': return saveRegras();
+    case 'proxRota': return go('registrar', { loja: d.pl, data: d.pd, modo: 'rota' });
     case 'pedirAlteracao': return go('pedir', { id: d.id });
     case 'enviarPedido': return enviarPedido(d.id);
     case 'resolver': return resolver(d.id, d.ok === '1');
@@ -1809,6 +2178,7 @@ document.addEventListener('click', e => {
       ['NomeFantasia', 'Luc', 'Tipo', 'Categoria', 'Segmento', 'Piso', 'Contrato'].forEach(k => { base[k] = val(k); });
       const abl = val('ABL').replace(/\./g, '').replace(',', '.');
       base.ABL = abl === '' ? '' : +abl;
+      { const rb = $('[data-rotaval][aria-pressed="true"]'); base.Rota = rb ? rb.dataset.segval : 'Sim'; }
       base['Situação'] = ($('[data-sit][aria-pressed="true"]') || {}).dataset ? $('[data-sit][aria-pressed="true"]').dataset.sit : 'Ativo';
       delete base._pending;
       const item = { type: 'loja', loja: base, logo: S.newLogo || '' };
@@ -1839,6 +2209,8 @@ document.addEventListener('keydown', e => {
 document.addEventListener('input', e => {
   const id = e.target.id;
   const fd = e.target.closest && e.target.closest('.field.invalid'); if (fd) fieldErr(fd.id, '');
+  if (id === 'vTicket' || id === 'pTicket') { const c = e.target.value.replace(/\D/g, '').slice(0, 6); if (c !== e.target.value) e.target.value = c; }
+  if (id === 'vResp') e.target.dataset.auto = '';
   if (id === 'busca') { S.ui.busca = e.target.value; debounceRender(); }
   if (id === 'hBusca') { S.ui.histBusca = e.target.value; debounceRender(); }
 });
@@ -1849,6 +2221,7 @@ document.addEventListener('change', e => {
   if (id === 'fPiso') { S.ui.piso = e.target.value; persist(); render(); }
   if (id === 'fOrdem') { S.ui.ordem = e.target.value; persist(); render(); }
   if (id === 'fAtraso') { S.ui.atrasoDias = +e.target.value; render(); }
+  if (e.target.dataset && e.target.dataset.rotachk) { S.rotaEdit[e.target.dataset.rotachk] = e.target.checked ? 'Sim' : 'Não'; const n = $('#rotaCount'); if (n) n.textContent = rotaConfigResumo(); }
   if (id === 'hAud') { S.ui.histAud = e.target.value; render(); }
 });
 let drT = null;
@@ -1866,6 +2239,9 @@ setInterval(() => { if (S.user && S.queue.length) sync({ full: false }); }, 60e3
 
 /* ============================ Início ============================ */
 (async function start() {
+  aplicarTema(temaAtual());
+  try { matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => aplicarTema(temaAtual())); } catch (e) { /* navegador antigo */ }
+  setTimeout(() => { const sp = document.getElementById('splash'); if (sp) { sp.classList.add('out'); setTimeout(() => sp.remove(), 450); } }, 350);
   if (!DEMO && 'serviceWorker' in navigator && location.protocol === 'https:') {
     try { navigator.serviceWorker.register('sw.js'); } catch (e) { /* sem modo offline */ }
   }
@@ -1886,7 +2262,7 @@ setInterval(() => { if (S.user && S.queue.length) sync({ full: false }); }, 60e3
   rebuildFromData();
   if (!DEMO && !S.apiUrl) { S.stack = [{ v: 'setup', p: {} }]; return render(); }
   if (!S.user) { S.stack = [{ v: 'login', p: {} }]; render(); return loadAuditores(); }
-  S.stack = [{ v: 'lojas', p: {} }];
+  S.stack = [{ v: 'rota', p: {} }];
   render();
   sync({ full: true });
 })();
