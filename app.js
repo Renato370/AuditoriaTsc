@@ -3,8 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.3.4';
-const MIN_SERVER = '1.3.2';
+const APP_VERSION = '1.3.5';
+const MIN_SERVER = '1.3.5';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -642,7 +642,7 @@ VIEWS.lojas = () => {
 
   const search = S.ui.buscaAberta || S.ui.busca ? `<div class="search gutter"><input id="busca" type="search" placeholder="Buscar por nome, LUC, segmento…" value="${esc(S.ui.busca)}" autocomplete="off"></div>` : '';
   const html = `
-  ${topbar({ title: 'Lojas', sub: CFG.nomeShopping || '', actions: `<button class="icon-btn" data-act="toggleBusca" aria-label="Buscar">${ICON.search}</button>`, search })}
+  ${topbar({ title: 'Lojas', sub: CFG.nomeShopping || '', actions: `${isMaster() ? `<button class="icon-btn" data-act="novaLoja" aria-label="Cadastrar nova loja" title="Cadastrar nova loja">${ICON.plus}</button>` : ''}<button class="icon-btn" data-act="toggleBusca" aria-label="Buscar">${ICON.search}</button>`, search })}
   <main><div class="wrap">
     <div class="gutter section" style="display:grid;gap:10px">
       ${solPend ? `<button class="alert warn" data-act="verSolic" style="border:0;text-align:left;width:100%"><div><b>${solPend} solicitaç${solPend > 1 ? 'ões' : 'ão'} de alteração</b> aguardando sua aprovação. Toque para ver.</div></button>` : ''}
@@ -656,6 +656,7 @@ VIEWS.lojas = () => {
         <div class="muted" style="font-size:13px">Vendas de ${esc(diaLongo(ref))}. ${pendCount ? pendCount + ' loja' + (pendCount > 1 ? 's' : '') + ' sem lançamento.' : 'Todas as lojas lançadas.'}</div>
       </div>
       <div class="chips" role="group" aria-label="Filtros">
+        ${isMaster() ? `<button class="chip" data-act="novaLoja" style="border-color:var(--brand);color:var(--brand)">+ Nova loja</button>` : ''}
         <button class="chip" data-filtro="todas" aria-pressed="${S.ui.filtro === 'todas'}">Todas<b>${ativas.length}</b></button>
         <button class="chip" data-filtro="pendentes" aria-pressed="${S.ui.filtro === 'pendentes'}">Pendentes<b>${pendCount}</b></button>
         <button class="chip" data-filtro="lancadas" aria-pressed="${S.ui.filtro === 'lancadas'}">Lançadas<b>${lanc}</b></button>
@@ -1888,6 +1889,7 @@ VIEWS.mais = () => {
       <h3 class="h2" style="margin:0">Cadastros</h3>
       <button class="btn" style="width:100%" data-act="auditores">${ICON.user}Auditores: nome, senha, foto e perfil</button>
       <button class="btn" style="width:100%" data-act="novaLoja">${ICON.plus}Cadastrar nova loja</button>
+      <button class="btn" style="width:100%" data-act="recarregarLogos">${ICON.sync}Recarregar logos das lojas</button>
       <button class="btn" style="width:100%" data-act="rotaConfig">${ICON.route}Lojas da rota diária</button>
       <button class="btn" style="width:100%" data-act="regras">${ICON.chart}Regras e pontuação da equipe</button>
     </div>` : ''}
@@ -2176,6 +2178,7 @@ document.addEventListener('click', e => {
     case 'novoAud': return go('audForm', {});
     case 'saveAud': return saveAud(d.id);
     case 'rotaConfig': S.rotaEdit = {}; return go('rotaConfig');
+    case 'recarregarLogos': S.logos = {}; persistLogos(); toast('Buscando os logos de novo…'); return loadLogos();
     case 'saveRota': return saveRota();
     case 'regras': return go('regras');
     case 'saveRegras': return saveRegras();
