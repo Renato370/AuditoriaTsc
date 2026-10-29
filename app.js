@@ -3,8 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.3.0';
-const MIN_SERVER = '1.3.0';
+const APP_VERSION = '1.3.2';
+const MIN_SERVER = '1.3.2';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -426,8 +426,14 @@ function aplicarTema(t) {
 }
 function setTema(t) { S.temaMem = t; try { if (t === 'auto') localStorage.removeItem('tema'); else localStorage.setItem('tema', t); } catch (e) { /* só nesta sessão */ } aplicarTema(t); }
 
-const CFG_PADRAO = { pts_prazo: 10, pts_atraso_curto: 5, pts_atraso_longo: 2, pts_motivo: 3, pts_correcao: -5, pts_exclusao: -10, pts_sequencia: 5, pts_conquista: 20, desafio_titulo: '', desafio_tipo: 'prazo', desafio_meta: 90, desafio_ate: '' };
+const CFG_PADRAO = { rota_dias: 30, pts_prazo: 10, pts_atraso_curto: 5, pts_atraso_longo: 2, pts_motivo: 3, pts_correcao: -5, pts_exclusao: -10, pts_sequencia: 5, pts_conquista: 20, desafio_titulo: '', desafio_tipo: 'prazo', desafio_meta: 90, desafio_ate: '' };
 const cfg = k => (S.data && S.data.config && k in S.data.config) ? S.data.config[k] : CFG_PADRAO[k];
+/* Quantos dias para trás contam como atraso (config do master), limitado aos dados guardados no aparelho */
+function janelaAtraso() {
+  let n = Math.max(1, Math.min(60, Math.round(+cfg('rota_dias') || 30)));
+  if (S.data && S.data.corte) n = Math.min(n, diasEntre(today(), S.data.corte));
+  return Math.max(1, n);
+}
 const lojasRota = () => lojasAll().filter(l => l['Situação'] !== 'Inativo' && l.Rota !== 'Não');
 const naRota = l => l && l['Situação'] !== 'Inativo' && l.Rota !== 'Não';
 const addDias = (ymd, n) => { const d = new Date(ymd.slice(0, 10) + 'T12:00:00'); d.setDate(d.getDate() + n); return ymdOf(d); };
@@ -504,7 +510,7 @@ function lojasAtivas() { return lojasAll().filter(l => l['Situação'] !== 'Inat
 function proximaPendente(lojaId, data, modo) {
   if (modo !== 'dia') {
     // rota / atrasadas: termina os dias da mesma loja e segue para a próxima loja da rota
-    const n = modo === 'atrasadas' ? (S.ui.atrasoDias || 7) : 7;
+    const n = modo === 'atrasadas' && S.ui.atrasoDias ? Math.min(S.ui.atrasoDias, janelaAtraso()) : janelaAtraso();
     const mesma = naRota(lojaById(lojaId)) ? diasAtrasados(lojaId, n) : [];
     const ord = lojasRota().sort(ordemRota);
     const todas = ord.map(l => ({ l, d: diasAtrasados(l.IdLoja, n) })).filter(x => x.d.length);
@@ -605,10 +611,10 @@ VIEWS.lojas = () => {
   const refLabel = ref === ontem() ? 'Ontem' : ref === today() ? 'Hoje' : dBR(ref);
   const solPend = isMaster() ? solicAll().filter(x => x.Status === 'Pendente').length : 0;
   const busca = norm(S.ui.busca);
-  const ativas = lojasAll().filter(l => S.ui.inativas || l['Situação'] !== 'Inativo');
+  const ativas = lojasAll().filter(l => (isMaster() && S.ui.inativas) || l['Situação'] !== 'Inativo');
   const infos = ativas.map(l => ({ l, i: lojaInfo(l, ref) }));
   const lanc = infos.filter(x => x.i.kind === 'ok' || x.i.kind === 'pend').length;
-  const nAtr = S.ui.atrasoDias || 7;
+  const nAtr = S.ui.atrasoDias ? Math.min(S.ui.atrasoDias, janelaAtraso()) : janelaAtraso();
   infos.forEach(x => { x.atr = naRota(x.l) ? diasAtrasados(x.l.IdLoja, nAtr) : []; });
   const atrLojas = infos.filter(x => x.atr.length).length;
   const atrDias = infos.reduce((s, x) => s + x.atr.length, 0);
@@ -653,12 +659,12 @@ VIEWS.lojas = () => {
         <button class="chip" data-filtro="pendentes" aria-pressed="${S.ui.filtro === 'pendentes'}">Pendentes<b>${pendCount}</b></button>
         <button class="chip" data-filtro="lancadas" aria-pressed="${S.ui.filtro === 'lancadas'}">Lançadas<b>${lanc}</b></button>
         <button class="chip" data-filtro="atrasadas" aria-pressed="${modoAtr}">Atrasadas<b>${atrLojas}</b></button>
-        ${modoAtr ? `<select class="chip" id="fAtraso" aria-label="Período">${[7, 15, 30].map(n => `<option value="${n}" ${nAtr === n ? 'selected' : ''}>Últimos ${n} dias</option>`).join('')}</select>` : ''}
+        ${modoAtr ? `<select class="chip" id="fAtraso" aria-label="Período">${Array.from(new Set([7, 15, 30, 60, nAtr])).filter(n => n <= janelaAtraso() || n === nAtr).sort((a, b) => a - b).map(n => `<option value="${n}" ${nAtr === n ? 'selected' : ''}>Últimos ${n} dias</option>`).join('')}</select>` : ''}
         <select class="chip" id="fPiso" aria-label="Piso"><option value="">Todos os pisos</option>${pisos.map(p => `<option ${S.ui.piso === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>
         <select class="chip" id="fOrdem" aria-label="Ordenar">
           ${[['luc', 'Ordem: LUC'], ['nome', 'Ordem: Nome'], ['coleta', 'Coleta mais antiga'], ['dias', 'Menos dias lançados']].map(([k, l]) => `<option value="${k}" ${ord === k ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
-        <button class="chip" data-act="toggleInativas" aria-pressed="${S.ui.inativas}">Mostrar inativas</button>
+        ${isMaster() ? `<button class="chip" data-act="toggleInativas" aria-pressed="${S.ui.inativas}">Mostrar inativas</button>` : ''}
       </div>
     </div>
     <div class="list">
@@ -671,7 +677,7 @@ VIEWS.lojas = () => {
           <div class="store-prog num"><span class="bar"><i style="width:${Math.round(i.dias / i.total * 100)}%"></i></span>${i.dias}/${i.total} dias · ${i.ultima ? 'coleta ' + esc(dShort(i.ultima) + ' ' + i.ultima.slice(11, 16)) : 'sem coleta'}</div>
         </div>
         <div class="store-side">
-          ${modoAtr ? `<span class="status st-no">${x.atr.length} dia${x.atr.length > 1 ? 's' : ''}</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${x.atr[0]}" data-modo="atrasadas">+ Lançar ${dShort(x.atr[0])}</button>`
+          ${modoAtr ? `<span class="status st-no">Faltam ${x.atr.length}</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${x.atr[0]}" data-modo="atrasadas">+ Lançar ${dShort(x.atr[0])}</button>`
             : `${statusPill(i.kind)}${i.kind === 'ok' || i.kind === 'pend' ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`}`}
         </div>
       </div>`; }).join('') : `<div class="empty">${ICON.store}<div>${modoAtr ? 'Nenhuma loja em atraso.' : 'Nenhuma loja encontrada.'}</div></div>`}
@@ -686,7 +692,8 @@ VIEWS.lojas = () => {
 VIEWS.rota = () => {
   const ontemD = ontem();
   const rl = lojasRota().sort(ordemRota);
-  const itens = rl.map(l => ({ l, d: diasAtrasados(l.IdLoja, 7) }));
+  const jan = janelaAtraso();
+  const itens = rl.map(l => ({ l, d: diasAtrasados(l.IdLoja, jan) }));
   const pend = itens.filter(x => x.d.length);
   const ontemFeitas = itens.filter(x => !x.d.includes(ontemD)).length;
   const atrasos = itens.reduce((s, x) => s + x.d.filter(k => k !== ontemD).length, 0);
@@ -698,7 +705,8 @@ VIEWS.rota = () => {
   const chipDias = ds => {
     const o = ds.includes(ontemD) ? '<span class="status st-no">Ontem</span>' : '';
     const outros = ds.filter(k => k !== ontemD);
-    return o + (outros.length ? `<span class="status st-mot">${outros.length === 1 ? dShort(outros[0]) : outros.length + ' atrasados'}</span>` : '');
+    return `<span class="status st-mot">Faltam ${ds.length} dia${ds.length > 1 ? 's' : ''}</span>` + o +
+      (outros.length ? `<span class="muted" style="font-size:12px;align-self:center">${outros.length === 1 ? 'atraso: ' + dShort(outros[0]) : 'mais antigo: ' + dShort(outros[0])}</span>` : '');
   };
   const html = `
   ${topbar({ title: 'Minha rota de hoje', sub: diaLongo(today()).replace(/^./, c => c.toUpperCase()) })}
@@ -708,7 +716,7 @@ VIEWS.rota = () => {
       <div class="card today">
         <div class="today-head"><div class="today-big num">${ontemFeitas}<small> de ${rl.length} lojas com a venda de ontem</small></div></div>
         <div class="bar"><i style="width:${pct}%"></i></div>
-        <div class="muted" style="font-size:13px">${atrasos ? `E mais <b>${atrasos}</b> lançamento${atrasos > 1 ? 's' : ''} em atraso nos últimos 7 dias.` : 'Nenhum atraso nos últimos 7 dias.'}</div>
+        <div class="muted" style="font-size:13px">${atrasos ? `E mais <b>${atrasos}</b> lançamento${atrasos > 1 ? 's' : ''} em atraso nos últimos ${jan} dias.` : `Nenhum atraso nos últimos ${jan} dias.`}</div>
       </div>
       ${prox ? `<button class="btn primary" style="min-height:64px;font-size:16.5px;display:grid;grid-template-columns:auto 1fr auto;text-align:left;gap:12px" data-act="proxRota" data-pl="${esc(prox.l.IdLoja)}" data-pd="${prox.d[0]}">
         ${ICON.dollar}<span style="min-width:0"><span style="display:block">Lançar próxima loja</span><span style="display:block;font-weight:600;font-size:13.5px;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(prox.l.NomeFantasia)} · ${esc(prox.l.Piso || '')} · venda de ${dShort(prox.d[0])}</span></span>${ICON.right}</button>`
@@ -720,10 +728,10 @@ VIEWS.rota = () => {
         ${avatar(x.l)}
         <div class="store-main"><div class="store-name">${esc(x.l.NomeFantasia)}</div><div class="store-meta">LUC ${esc(x.l.Luc)} · ${esc(x.l.Segmento || x.l.Categoria || '')}</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">${chipDias(x.d)}</div></div>
-        <div class="store-side"><button class="quick" data-registrar="${esc(x.l.IdLoja)}" data-data="${x.d[0]}" data-modo="rota">+ Lançar ${dShort(x.d[0])}</button></div>
+        <div class="store-side"><button class="quick" data-registrar="${esc(x.l.IdLoja)}" data-data="${x.d[0]}" data-modo="rota" title="Começa pelo dia mais antigo">+ Lançar ${dShort(x.d[0])}</button></div>
       </div>`).join('')}</div>`).join('')}
     <div class="gutter section" style="display:grid;gap:8px">
-      <div class="muted" style="font-size:12.5px">A rota mostra as lojas sem a venda de ontem e as que estão com dias em atraso (últimos 7 dias), na ordem de piso e LUC. Dias com motivo registrado não contam como atraso.${fora ? ` ${fora} loja${fora > 1 ? 's' : ''} fora da rota.` : ''}</div>
+      <div class="muted" style="font-size:12.5px">A rota mostra as lojas sem a venda de ontem e as que estão com dias em atraso (últimos ${jan} dias), na ordem de piso e LUC. O botão de cada loja abre sempre o dia mais antigo que falta. Dias com motivo registrado não contam como atraso.${fora ? ` ${fora} loja${fora > 1 ? 's' : ''} fora da rota.` : ''}</div>
       ${isMaster() ? `<button class="btn" data-act="rotaConfig">${ICON.route}Escolher lojas da rota</button>` : ''}
     </div>
   </div></main>
@@ -743,6 +751,9 @@ VIEWS.rotaConfig = () => {
   ${topbar({ title: 'Lojas da rota', backBtn: true })}
   <main class="form-main"><div class="wrap">
     <div class="gutter section"><div class="alert warn"><div>Desmarque as lojas que o auditor <b>não visita todos os dias</b>. Elas saem da rota diária e da contagem de atrasos, mas continuam na lista de Lojas e podem ser lançadas normalmente.</div></div>
+    <div class="field" style="margin-top:14px"><label for="rotaDias">Contar como atraso os últimos quantos dias?</label>
+      <select id="rotaDias">${[7, 15, 30, 45, 60].map(n => `<option value="${n}" ${+cfg('rota_dias') === n ? 'selected' : ''}>${n} dias</option>`).join('')}</select>
+      <div class="hint">Vale para a rota de todos os auditores e para o filtro "Atrasadas".</div></div>
     <div style="font-weight:700;margin-top:12px" id="rotaCount">${rotaConfigResumo()}</div></div>
     ${Object.keys(grupos).sort((a, b) => PISO_ORD(a) - PISO_ORD(b) || a.localeCompare(b)).map(p => `<div class="group-h"><span>${esc(p)}</span></div>
       <div class="list">${grupos[p].map(l => `<label class="row" style="grid-template-columns:auto 1fr auto;cursor:pointer">${avatar(l, 38)}<div><div class="t">${esc(l.NomeFantasia)}</div><div class="s">LUC ${esc(l.Luc)} · ${esc(l.Tipo || '')}</div></div>
@@ -755,12 +766,14 @@ VIEWS.rotaConfig = () => {
 async function saveRota() {
   const mud = {};
   Object.keys(S.rotaEdit || {}).forEach(id => { const l = lojaById(id); if (l && (l.Rota || 'Sim') !== S.rotaEdit[id]) mud[id] = S.rotaEdit[id]; });
-  if (!Object.keys(mud).length) return back();
+  const dias = +$('#rotaDias').value;
+  const mudouDias = dias !== +cfg('rota_dias');
+  if (!Object.keys(mud).length && !mudouDias) return back();
   if (!DEMO && !navigator.onLine) { $('#rotaErr').innerHTML = '<div class="alert bad">Alterar a rota precisa de internet.</div>'; return; }
   const btn = $('[data-act="saveRota"]'); btn.disabled = true;
   try {
-    const r = await api('salvarRota', { mudancas: mud });
-    if (S.data) S.data.lojas = r.lojas;
+    if (Object.keys(mud).length) { const r = await api('salvarRota', { mudancas: mud }); if (S.data) S.data.lojas = r.lojas; }
+    if (mudouDias) { const r2 = await api('salvarConfig', { valores: { rota_dias: dias } }); if (S.data) S.data.config = r2.config; }
     S.ver++; await persist();
     toast('Rota atualizada.');
     back();
@@ -863,7 +876,7 @@ function gamificacao(mes) {
   const totPrazo = lista.reduce((t, j) => t + j.itens.prazo, 0);
   const ontemD = ontem();
   const ontemOk = rotaLs.filter(l => coberto(l.IdLoja, ontemD, hoje)).length;
-  const atrasosAgora = rotaLs.reduce((t, l) => t + diasAtrasados(l.IdLoja, 7).length, 0);
+  const atrasosAgora = rotaLs.reduce((t, l) => t + diasAtrasados(l.IdLoja, janelaAtraso()).length, 0);
   const val = { lista, totLanc, pctPrazo: totLanc ? Math.round(totPrazo / totLanc * 100) : 0, ontemOk, rotaTotal: rotaLs.length, atrasosAgora, P };
   gameCache = { key, val };
   return val;
@@ -901,7 +914,7 @@ VIEWS.equipe = () => {
       ${desafioCard(g, mes)}
       ${mes === mesAtual ? `<div class="kpis">
         <div class="kpi"><span class="l">Meta do dia</span><span class="v num">${g.ontemOk}/${g.rotaTotal}</span><span class="d muted">lojas da rota com a venda de ontem</span></div>
-        <div class="kpi"><span class="l">Atrasos na rota</span><span class="v num">${g.atrasosAgora}</span><span class="d muted">últimos 7 dias</span></div>
+        <div class="kpi"><span class="l">Atrasos na rota</span><span class="v num">${g.atrasosAgora}</span><span class="d muted">últimos ${janelaAtraso()} dias</span></div>
       </div>` : ''}
     </div>
     <div class="section">
@@ -1016,7 +1029,7 @@ VIEWS.loja = (p) => {
     const ds = mes + '-' + pad(d);
     const v = M.byLojaData.get(l.IdLoja + '|' + ds);
     let cls = 'day', inner = `${d}`, act = '';
-    if (v) { cls += v._pending ? ' mot' : ' ok'; inner += `<small>${esc(kShort(v.vendas))}</small>`; act = `data-venda="${esc(v.id)}"`; }
+    if (v) { cls += v._pending ? ' mot' : ' ok'; { const txt = int(v.vendas); inner += `<small class="num" style="font-size:${txt.length > 6 ? 7.5 : txt.length > 5 ? 8.5 : 9.5}px;letter-spacing:-.02em">${esc(txt)}</small>`; } act = `data-venda="${esc(v.id)}"`; }
     else if (ds > hoje) { cls += ' fut'; act = 'disabled'; }
     else if (motDias.has(ds)) { cls += ' mot'; inner += '<small>motivo</small>'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     else { cls += ' miss'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
@@ -1041,6 +1054,12 @@ VIEWS.loja = (p) => {
         <button class="btn" data-act="motivo" data-id="${esc(l.IdLoja)}">${ICON.note}Motivo</button>
         ${isMaster() ? `<button class="btn" data-act="editLoja" data-id="${esc(l.IdLoja)}">${ICON.edit}Editar</button>` : ''}
       </div>
+      ${isMaster() ? `<div class="card" style="margin-top:10px;padding:12px 14px;display:grid;gap:12px">
+        <label style="display:flex;align-items:center;gap:12px;cursor:pointer"><span style="flex:1"><b>Loja ativa</b><br><span class="muted" style="font-size:12.5px">Inativa some da lista dos auditores, da rota e das pendências.</span></span>
+          <input type="checkbox" class="switch" data-lojaflag="Situação" data-id="${esc(l.IdLoja)}" ${l['Situação'] !== 'Inativo' ? 'checked' : ''} aria-label="Loja ativa"></label>
+        <label style="display:flex;align-items:center;gap:12px;cursor:pointer"><span style="flex:1"><b>Na rota diária</b><br><span class="muted" style="font-size:12.5px">Desligue se o auditor não passa nela todos os dias.</span></span>
+          <input type="checkbox" class="switch" data-lojaflag="Rota" data-id="${esc(l.IdLoja)}" ${l.Rota !== 'Não' ? 'checked' : ''} ${l['Situação'] === 'Inativo' ? 'disabled' : ''} aria-label="Na rota diária"></label>
+      </div>` : ''}
     </div>
     <div class="gutter section">
       <div class="month-nav" style="margin-bottom:10px">
@@ -1692,7 +1711,7 @@ VIEWS.painel = () => {
         <div class="kpi"><span class="l">Tickets</span><span class="v num">${int(a.t)}</span>${dl(a.t, pm.t, 'mês ant.')}</div>
         <div class="kpi"><span class="l">Ticket médio</span><span class="v num">${a.t ? money(a.v / a.t) : '—'}</span>${a.t && pm.t ? dl(a.v / a.t, pm.v / pm.t, 'mês ant.') : ''}</div>
         <div class="kpi"><span class="l">Lojas com venda</span><span class="v num">${a.lj}</span><span class="d muted">${ativas} lojas ativas</span></div>
-        <div class="kpi"><span class="l">Cobertura</span><span class="v num">${cobertura.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span><span class="d muted">${int(a.n)} de ${int(ativas * diasCorridos)} lojas-dia</span></div>
+        <div class="kpi"><span class="l">Vendas diárias lançadas</span><span class="v num">${cobertura.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span><span class="d muted">${int(a.n)} de ${int(ativas * diasCorridos)} esperadas (${ativas} lojas × ${diasCorridos} dias)</span></div>
       </div>
       ${isMaster() ? `<button class="btn" data-act="relatorio" data-mes="${mes}">${ICON.chart}Baixar relatório de ${esc(MESES[+mes.slice(5) - 1])} (Excel)</button>` : ''}
       ${isAtual ? '<div class="muted" style="font-size:12.5px">Dados da última sincronização' + (S.lastSync ? ' (' + new Date(S.lastSync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + ')' : '') + '. Lançamentos ainda na fila entram após o envio.</div>' : ''}
@@ -2221,6 +2240,15 @@ document.addEventListener('change', e => {
   if (id === 'fPiso') { S.ui.piso = e.target.value; persist(); render(); }
   if (id === 'fOrdem') { S.ui.ordem = e.target.value; persist(); render(); }
   if (id === 'fAtraso') { S.ui.atrasoDias = +e.target.value; render(); }
+  if (e.target.dataset && e.target.dataset.lojaflag) {
+    const l = lojaById(e.target.dataset.id); if (!l) return;
+    const campo = e.target.dataset.lojaflag;
+    const loja = Object.assign({}, l); delete loja._pending;
+    loja[campo] = campo === 'Situação' ? (e.target.checked ? 'Ativo' : 'Inativo') : (e.target.checked ? 'Sim' : 'Não');
+    enqueue({ type: 'loja', loja, logo: '' });
+    toast(campo === 'Situação' ? (e.target.checked ? 'Loja ativada.' : 'Loja desativada.') : (e.target.checked ? 'Loja voltou para a rota.' : 'Loja retirada da rota.'));
+    return refresh();
+  }
   if (e.target.dataset && e.target.dataset.rotachk) { S.rotaEdit[e.target.dataset.rotachk] = e.target.checked ? 'Sim' : 'Não'; const n = $('#rotaCount'); if (n) n.textContent = rotaConfigResumo(); }
   if (id === 'hAud') { S.ui.histAud = e.target.value; render(); }
 });
