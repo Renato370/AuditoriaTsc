@@ -3,7 +3,7 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.3.3';
+const APP_VERSION = '1.3.4';
 const MIN_SERVER = '1.3.2';
 
 /* ============================ Utilidades ============================ */
@@ -345,13 +345,14 @@ function upsertRecent(v) {
 let logosBusy = false;
 async function loadLogos() {
   if (logosBusy || !S.user || (!DEMO && !navigator.onLine)) return;
-  const falta = lojasAll().filter(l => l.Logo && (!S.logos[l.IdLoja] || S.logos[l.IdLoja].path !== l.Logo)).map(l => l.IdLoja);
+  // busca logos novos; os que não foram encontrados são tentados de novo a cada 30 min
+  const falta = lojasAll().filter(l => { const g = S.logos[l.IdLoja]; return l.Logo && (!g || g.path !== l.Logo || (!g.data && Date.now() - (g.at || 0) > 30 * 60e3)); }).map(l => l.IdLoja);
   if (!falta.length) return;
   logosBusy = true;
   try {
     for (let i = 0; i < falta.length; i += 10) {
       const r = await api('logos', { ids: falta.slice(i, i + 10) });
-      Object.assign(S.logos, r.logos);
+      Object.keys(r.logos).forEach(id => { S.logos[id] = Object.assign({}, r.logos[id], { at: Date.now() }); });
       await persistLogos();
       refresh(true);
     }
