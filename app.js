@@ -3,8 +3,8 @@
 
 const CFG = window.APP_CONFIG || {};
 const DEMO = typeof window.DEMO_API === 'function';
-const APP_VERSION = '1.4.0';
-const MIN_SERVER = '1.4.0';
+const APP_VERSION = '1.5.0';
+const MIN_SERVER = '1.5.0';
 
 /* ============================ Utilidades ============================ */
 const $ = (s, r = document) => r.querySelector(s);
@@ -26,6 +26,9 @@ const ymdOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.g
 const today = () => ymdOf(new Date());
 const ontem = () => { const d = new Date(); d.setDate(d.getDate() - 1); return ymdOf(d); };
 const isMaster = () => !!(S.user && S.user.perfil === 'Master');
+const isConsulta = () => !!(S.user && S.user.perfil === 'Consulta');
+const veAnalises = () => isMaster() || isConsulta();
+const inicioPerfil = () => isConsulta() ? 'painel' : 'rota';
 const verLt = (a, b) => { const x = String(a || '0').split('.').map(Number), y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); } return false; };
 const nowStr = () => { const d = new Date(); return ymdOf(d) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); };
 const dBR = s => s ? s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
@@ -115,7 +118,8 @@ const KV = (() => {
 const COLMAP = {
   VendaId: 'id', HoraRegistro: 'hora', Data: 'data', Auditor: 'auditor', Contrato: 'contrato', Loja: 'loja',
   'Nome Fantasia': 'nome', ABL: 'abl', Piso: 'piso', Tipo: 'tipo', Categoria: 'categoria', Segmento: 'segmento',
-  Vendas: 'vendas', Ticket: 'ticket', Responsavel: 'resp', Assinatura: 'assin', Email: 'email'
+  Vendas: 'vendas', Ticket: 'ticket', Responsavel: 'resp', Assinatura: 'assin', Email: 'email',
+  Vendas1: 'v1', Vendas2: 'v2', Vendas3: 'v3'
 };
 
 const S = {
@@ -210,6 +214,7 @@ function merged() {
       const loja = lojaById(q.venda.Loja) || {};
       byId.set(q.venda.VendaId, Object.assign({}, base, {
         id: q.venda.VendaId, data: q.venda.Data, loja: q.venda.Loja, vendas: +q.venda.Vendas, ticket: +q.venda.Ticket,
+        v1: q.venda.Vendas1 != null ? +q.venda.Vendas1 : base.v1, v2: q.venda.Vendas2 != null ? +q.venda.Vendas2 : base.v2, v3: q.venda.Vendas3 != null ? +q.venda.Vendas3 : base.v3,
         resp: q.venda.Responsavel, hora: base.hora || q.hora, auditor: base.auditor || (S.user && S.user.nome),
         nome: loja.NomeFantasia, contrato: loja.Contrato, abl: loja.ABL, piso: loja.Piso, tipo: loja.Tipo,
         categoria: loja.Categoria, segmento: loja.Segmento, assin: base.assin || '', email: base.email || '',
@@ -307,6 +312,7 @@ async function sync({ full = true, quiet = true } = {}) {
     refresh();
     loadLogos();
     loadFotos();
+    if (veAnalises()) loadAnal();
     if (S.syncAgain !== undefined) { const f = S.syncAgain; S.syncAgain = undefined; sync({ full: f }); }
   }
 }
@@ -415,7 +421,7 @@ function toast(msg) {
 }
 
 /* ============================ Marca, tema e configurações ============================ */
-const SELO = (c, s = 4) => `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="34" fill="none" stroke="${c}" stroke-width="${s}"/><path d="M32 55 Q39 47 46 46.5 Q50 46.3 51.5 43 Q54 37 55 29 Q56 23 58.5 23 Q61 23 61 29 Q61 45 64.5 58 Q66.5 66 61.5 66.5 Q57 67 56.5 61.5" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"/><path d="M29 67 Q47 56 71 60" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round"/></svg>`;
+const SELO = (c, s = 4) => `<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="34" fill="none" stroke="${c}" stroke-width="${s}"/><path d="M32 55 Q39 47 46 46.5 Q50 46.3 51.5 43 Q54 37 55 29 Q56 23 58.5 23 Q61 23 61 29 Q61 45 63 54 Q63.7 57.2 64.3 59.1" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round" stroke-linejoin="round"/><path d="M29 67 Q47 56 71 60" fill="none" stroke="${c}" stroke-width="${s}" stroke-linecap="round"/></svg>`;
 const SHOP_LOGO = window.SHOP_LOGO || 'icons/shopping-logo.png';
 
 function temaAtual() { try { return localStorage.getItem('tema') || 'auto'; } catch (e) { return S.temaMem || 'auto'; } }
@@ -427,7 +433,8 @@ function aplicarTema(t) {
 }
 function setTema(t) { S.temaMem = t; try { if (t === 'auto') localStorage.removeItem('tema'); else localStorage.setItem('tema', t); } catch (e) { /* só nesta sessão */ } aplicarTema(t); }
 
-const CFG_PADRAO = { rota_dias: 30, pts_prazo: 10, pts_atraso_curto: 5, pts_atraso_longo: 2, pts_motivo: 3, pts_correcao: -5, pts_exclusao: -10, pts_sequencia: 5, pts_conquista: 20, desafio_titulo: '', desafio_tipo: 'prazo', desafio_meta: 90, desafio_ate: '' };
+const CFG_PADRAO = { rota_dias: 30, pts_prazo: 10, pts_atraso_curto: 5, pts_atraso_longo: 2, pts_motivo: 3, pts_correcao: -5, pts_exclusao: -10, pts_sequencia: 5, pts_conquista: 20, desafio_titulo: '', desafio_tipo: 'prazo', desafio_meta: 90, desafio_ate: '',
+  div_limite: 5, mapa_vendas_verm: 30000, mapa_vendas_verde: 80000, mapa_m2_verm: 600, mapa_m2_verde: 1500, mapa_cresc_verm: 0, mapa_cresc_verde: 10, mapa_div_verde: 2, mapa_div_verm: 5 };
 const cfg = k => (S.data && S.data.config && k in S.data.config) ? S.data.config[k] : CFG_PADRAO[k];
 /* Quantos dias para trás contam como atraso (config do master), limitado aos dados guardados no aparelho */
 function janelaAtraso() {
@@ -602,7 +609,8 @@ function topbar({ title, sub = '', backBtn = false, actions = '', search = '' })
 }
 
 function navbar(active) {
-  const it = [['rota', 'Rota', ICON.route], ['lojas', 'Lojas', ICON.store], ['historico', 'Histórico', ICON.hist]].concat(isMaster() ? [['painel', 'Painel', ICON.chart]] : []).concat([['mais', 'Conta', ICON.user]]);
+  const it = isConsulta() ? [['painel', 'Painel', ICON.chart], ['lojas', 'Lojas', ICON.store], ['mais', 'Conta', ICON.user]]
+    : [['rota', 'Rota', ICON.route], ['lojas', 'Lojas', ICON.store], ['historico', 'Histórico', ICON.hist]].concat(isMaster() ? [['painel', 'Painel', ICON.chart]] : []).concat([['mais', 'Conta', ICON.user]]);
   return `<nav class="nav" style="grid-template-columns:repeat(${it.length},1fr)">${it.map(([k, l, i]) => `<button data-tab="${k}" ${active === k ? 'aria-current="page"' : ''}>${i}<span>${l}</span></button>`).join('')}</nav>`;
 }
 
@@ -713,20 +721,21 @@ VIEWS.lojas = () => {
           <div class="store-prog num"><span class="bar"><i style="width:${Math.round(i.dias / i.total * 100)}%"></i></span>${i.dias}/${i.total} dias · ${i.ultima ? 'coleta ' + esc(dShort(i.ultima) + ' ' + i.ultima.slice(11, 16)) : 'sem coleta'}</div>
         </div>
         <div class="store-side">
-          ${modoAtr ? `<span class="status st-no">Faltam ${x.atr.length}</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${x.atr[0]}" data-modo="atrasadas">+ Lançar ${dShort(x.atr[0])}</button>`
-            : modoEv && !lojaEsperada(l, ref) ? `<span class="status" style="background:var(--soft);color:var(--muted)">Fora do período</span><button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`
-            : `${statusPill(i.kind)}${i.kind === 'ok' || i.kind === 'pend' ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`}`}
+          ${modoAtr ? `<span class="status st-no">Faltam ${x.atr.length}</span>${isConsulta() ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${x.atr[0]}" data-modo="atrasadas">+ Lançar ${dShort(x.atr[0])}</button>`}`
+            : modoEv && !lojaEsperada(l, ref) ? `<span class="status" style="background:var(--soft);color:var(--muted)">Fora do período</span>${isConsulta() ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`}`
+            : `${statusPill(i.kind)}${i.kind === 'ok' || i.kind === 'pend' || isConsulta() ? '' : `<button class="quick" data-registrar="${esc(l.IdLoja)}" data-data="${ref}" data-modo="dia">+ Venda</button>`}`}
         </div>
       </div>`; }).join('') : `<div class="empty">${ICON.store}<div>${modoAtr ? 'Nenhuma loja em atraso.' : modoEv ? 'Nenhuma loja eventual.' : 'Nenhuma loja encontrada.'}</div></div>`}
     </div>
   </div></main>
-  <button class="fab" data-registrar="" data-data="${ref}" data-modo="dia">${ICON.plus}Registrar venda</button>
+  ${isConsulta() ? '' : `<button class="fab" data-registrar="" data-data="${ref}" data-modo="dia">${ICON.plus}Registrar venda</button>`}
   ${navbar('lojas')}`;
   return { html };
 };
 
 /* ---------- Minha rota de hoje ---------- */
 VIEWS.rota = () => {
+  if (isConsulta()) return VIEWS.painel();
   const ontemD = ontem();
   const rl = lojasRota().sort(ordemRota);
   const jan = janelaAtraso();
@@ -925,8 +934,9 @@ function gamificacao(mes) {
 }
 
 function painelAbas() {
-  const a = S.ui.painelAba || 'vendas';
-  return `<div class="seg" role="group">${[['vendas', 'Vendas'], ['equipe', 'Equipe e pontos']].map(([k, l]) => `<button data-paba="${k}" aria-pressed="${a === k}">${l}</button>`).join('')}</div>`;
+  let a = S.ui.painelAba || 'vendas';
+  if (a === 'equipe' && !isMaster()) a = 'vendas';
+  return `<div class="seg" role="group" style="font-size:13px">${[['vendas', 'Auditoria'], ['com21', 'Lojista'], ['mapa', 'Mapa']].concat(isMaster() ? [['equipe', 'Equipe']] : []).map(([k, l]) => `<button data-paba="${k}" aria-pressed="${a === k}">${l}</button>`).join('')}</div>`;
 }
 
 function desafioCard(g, mes) {
@@ -1074,6 +1084,7 @@ VIEWS.loja = (p) => {
     let cls = 'day', inner = `${d}`, act = '';
     if (v) { cls += v._pending ? ' mot' : ' ok'; { const txt = int(v.vendas); inner += `<small class="num" style="font-size:${txt.length > 6 ? 7.5 : txt.length > 5 ? 8.5 : 9.5}px;letter-spacing:-.02em">${esc(txt)}</small>`; } act = `data-venda="${esc(v.id)}"`; }
     else if (ds > hoje) { cls += ' fut'; act = 'disabled'; }
+    else if (isConsulta()) { cls += lojaEsperada(l, ds) ? ' miss' : ' off'; act = 'disabled'; }
     else if (!lojaEsperada(l, ds) && l['Situação'] !== 'Inativo') { cls += ' off'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     else if (motDias.has(ds)) { cls += ' mot'; inner += '<small>motivo</small>'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
     else { cls += ' miss'; act = `data-registrar="${esc(l.IdLoja)}" data-data="${ds}"`; }
@@ -1092,7 +1103,7 @@ VIEWS.loja = (p) => {
         <div class="tags"><span class="tag">LUC ${esc(l.Luc)}</span><span class="tag">${esc(l.Piso)}</span><span class="tag">${esc(l.Tipo)}</span>${ehEventual(l) ? `<span class="tag">Eventual · ${esc(periodoTxt(l))}</span>` : ''}${l['Situação'] === 'Inativo' ? '<span class="tag">Inativa</span>' : ''}</div>
       </div>
     </div>
-    <div class="gutter">
+    <div class="gutter" ${isConsulta() ? 'hidden' : ''}>
       <div class="actions" style="${isMaster() ? '' : 'grid-template-columns:1.4fr 1fr'}">
         <button class="btn primary" data-registrar="${esc(l.IdLoja)}" data-data="">${ICON.dollar}Registrar venda</button>
         <button class="btn" data-act="motivo" data-id="${esc(l.IdLoja)}">${ICON.note}Motivo</button>
@@ -1129,6 +1140,7 @@ VIEWS.loja = (p) => {
       </div>
       <div class="muted" style="font-size:12px;margin-top:8px">${esc(cmp.txt)}</div>
     </div>
+    ${veAnalises() ? cardCom21Loja(l, mes) : ''}
     <div class="gutter section">
       <div class="card cal">
         <div class="cal-grid">${['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(x => `<span class="cal-dow">${x}</span>`).join('')}${cells}</div>
@@ -1181,6 +1193,7 @@ function vendaRow(v, o = {}) {
   const loja = lojaById(v.loja);
   const nome = (loja && loja.NomeFantasia) || v.nome || v.loja;
   const t = o.semLoja ? dBR(v.data) : nome;
+  if (isConsulta()) { return `<button class="row" data-venda="${esc(v.id)}"><div><div class="t">${esc(t)}</div><div class="s">${esc(o.semLoja ? diaLongo(v.data) : dBR(v.data))}</div></div><div class="v num">${money(v.vendas)}<small>${int(v.ticket)} ticket${+v.ticket === 1 ? '' : 's'}</small></div></button>`; }
   const s = o.reg ? `venda de ${dShort(v.data)} · ${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`
     : o.semLoja ? `${audNome(v.auditor)}${v.resp ? ' · resp. ' + v.resp : ''}` : `${audNome(v.auditor)}${v.resp ? ' · ' + v.resp : ''}`;
   return `<button class="row" data-venda="${esc(v.id)}">
@@ -1216,16 +1229,17 @@ VIEWS.venda = (p) => {
     ${q && q.error ? `<div class="gutter" style="margin-bottom:12px"><div class="alert bad"><div><b>Não foi enviado:</b> ${esc(q.error)}</div><button data-act="descartar" data-qid="${q.qid}">Descartar este lançamento</button></div></div>` : ''}
     ${v._pending && !(q && q.error) ? '<div class="gutter" style="margin-bottom:12px"><div class="alert warn">Salvo no aparelho. Será enviado para a planilha assim que houver internet.</div></div>' : ''}
     <dl class="dl">
-      ${[['Data', dBR(v.data)], ['Loja', loja.NomeFantasia || v.nome], ['LUC', loja.Luc], ['Auditor', audNome(v.auditor)], ['Responsável', v.resp], ['Vendas', money(v.vendas)], ['Ticket', int(v.ticket)],
-    ['Contrato', v.contrato], ['ABL', v.abl], ['Piso', v.piso], ['Tipo', v.tipo], ['Categoria', v.categoria], ['Segmento', v.segmento], ['Registrado em', dtBR(v.hora)], ['E-mail', v.email], ['Código', v.id]]
+      ${[['Data', dBR(v.data)], ['Loja', loja.NomeFantasia || v.nome], ['LUC', loja.Luc]].concat(isConsulta() ? [] : [['Auditor', audNome(v.auditor)], ['Responsável', v.resp]]).concat([['Vendas', money(v.vendas)]])
+    .concat(partesDe(loja).map((n, i) => ['  ' + n, v['v' + (i + 1)] === '' || v['v' + (i + 1)] == null ? '—' : money(v['v' + (i + 1)])])).concat([['Ticket', int(v.ticket)],
+    ['Contrato', v.contrato], ['ABL', v.abl], ['Piso', v.piso], ['Tipo', v.tipo], ['Categoria', v.categoria], ['Segmento', v.segmento]]).concat(isConsulta() ? [] : [['Registrado em', dtBR(v.hora)], ['E-mail', v.email], ['Código', v.id]])
       .map(([k, x]) => `<dt>${k}</dt><dd>${esc(x) || '—'}</dd>`).join('')}
     </dl>
-    <div class="gutter section">
+    <div class="gutter section" ${isConsulta() ? 'hidden' : ''}>
       <h3 class="h2">Assinatura</h3>
       <div class="sig-img" id="sigBox">${v._sig ? `<img src="${v._sig}" alt="Assinatura">` : v.assin ? '<span class="muted">Carregando assinatura…</span>' : '<span class="muted">Sem assinatura</span>'}</div>
     </div>
     ${sp ? `<div class="gutter section"><button class="alert warn" data-solic="${esc(sp.id_solicitacao)}" style="border:0;text-align:left;width:100%"><div><b>${sp.Tipo === 'Exclusão' ? 'Exclusão' : 'Alteração'} solicitada</b> por ${esc(sp.Solicitante)}${sp.Tipo === 'Exclusão' ? '' : ': ' + esc(resumoSolic(sp))}. ${isMaster() ? 'Toque para aprovar ou recusar.' : 'Aguardando o master.'}</div></button></div>` : ''}
-    ${podeEditar ? `<div class="gutter section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    ${isConsulta() ? '' : podeEditar ? `<div class="gutter section" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <button class="btn" data-act="editVenda" data-id="${esc(v.id)}">${ICON.edit}Editar</button>
       <button class="btn danger" data-act="askDel" data-id="${esc(v.id)}">${ICON.trash}Excluir</button>
     </div>` : sp ? '' : `<div class="gutter section"><button class="btn" style="width:100%" data-act="pedirAlteracao" data-id="${esc(v.id)}">${ICON.edit}Solicitar alteração</button>
@@ -1238,7 +1252,7 @@ VIEWS.venda = (p) => {
   return {
     html,
     mount() {
-      if (!v._sig && v.assin) {
+      if (!v._sig && v.assin && !isConsulta()) {
         api('arquivo', { path: v.assin }).then(r => {
           const b = $('#sigBox'); if (!b) return;
           b.innerHTML = r.data ? `<img src="${r.data}" alt="Assinatura">` : '<span class="muted">Arquivo da assinatura não encontrado no Drive</span>';
@@ -1250,6 +1264,7 @@ VIEWS.venda = (p) => {
 
 /* ---------- Formulário de venda ---------- */
 VIEWS.registrar = (p) => {
+  if (isConsulta()) return VIEWS.painel();
   const editing = p.edit ? (merged().byId.get(p.edit) || null) : null;
   const lojaId = editing ? editing.loja : (p.loja || '');
   const data = editing ? editing.data : (p.data || ontem());
@@ -1276,7 +1291,8 @@ VIEWS.registrar = (p) => {
       <div class="field" id="fdVendas">
         <label for="vVendas">Vendas<span class="req">*</span></label>
         <input class="input money num" id="vVendas" inputmode="numeric" autocomplete="off" value="${editing ? money(editing.vendas) : ''}" placeholder="R$ 0,00">
-        <div class="hint">Digite só os números; os centavos entram automaticamente.</div>
+        <div class="hint" id="vVendasHint">Digite só os números; os centavos entram automaticamente.</div>
+        <div id="partesBox" style="display:grid;gap:10px"></div>
       </div>
       <div class="field" id="fdTicket">
         <label for="vTicket">Ticket<span class="req">*</span></label>
@@ -1311,7 +1327,37 @@ VIEWS.registrar = (p) => {
       const fV = $('#vVendas');
       let cents = editing ? Math.round(+editing.vendas * 100) : null;
       S.outlierOk = false;
+      // lojas com partes (cinema): três campos e o total é a soma
+      let partes = [], pc = [];
+      const montarPartes = () => {
+        const lj = lojaById($('#vLoja').value);
+        const novas = partesDe(lj);
+        if (novas.join('|') === partes.join('|')) return;
+        partes = novas;
+        const box = $('#partesBox');
+        if (!partes.length) { box.innerHTML = ''; fV.readOnly = false; $('#vVendasHint').textContent = 'Digite só os números; os centavos entram automaticamente.'; S.getPartes = () => null; return; }
+        const ed = editing && editing.loja === lj.IdLoja ? editing : null;
+        pc = partes.map((_, i) => ed && ed['v' + (i + 1)] !== '' && ed['v' + (i + 1)] != null ? Math.round(+ed['v' + (i + 1)] * 100) : (ed && i === 0 && (ed.v1 === '' || ed.v1 == null) ? Math.round(+ed.vendas * 100) : null));
+        box.innerHTML = partes.map((n, i) => `<label class="field" style="gap:4px;margin:0"><span style="font-size:13px;font-weight:700">${esc(n)}</span><input class="input money num" data-parte="${i}" inputmode="numeric" autocomplete="off" placeholder="R$ 0,00" value="${pc[i] == null ? '' : money(pc[i] / 100)}"></label>`).join('');
+        fV.readOnly = true;
+        $('#vVendasHint').textContent = 'Total calculado: soma de ' + partes.join(', ').replace(/, ([^,]*)$/, ' e $1') + '.';
+        const soma = () => { cents = pc.some(x => x != null) ? pc.reduce((a, b) => a + (b || 0), 0) : null; fV.value = cents == null ? '' : money(cents / 100); updTM(); };
+        $$('[data-parte]', box).forEach(inp => {
+          inp.addEventListener('input', () => {
+            S.outlierOk = false; $('#outBox').innerHTML = ''; fieldErr('fdVendas', '');
+            const d = inp.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+            pc[+inp.dataset.parte] = d ? parseInt(d.slice(0, 13), 10) : null;
+            inp.value = pc[+inp.dataset.parte] == null ? '' : money(pc[+inp.dataset.parte] / 100);
+            soma();
+          });
+          inp.addEventListener('focus', () => setTimeout(() => inp.setSelectionRange(inp.value.length, inp.value.length), 0));
+        });
+        S.getPartes = () => pc.map(x => (x || 0) / 100);
+        soma();
+      };
+      S.getPartes = () => null;
       fV.addEventListener('input', () => {
+        if (fV.readOnly) return;
         S.outlierOk = false; $('#outBox').innerHTML = '';
         const d = fV.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
         cents = d ? parseInt(d.slice(0, 13), 10) : null;
@@ -1345,8 +1391,9 @@ VIEWS.registrar = (p) => {
         }
         $('#respHint').textContent = fr.dataset.auto === '1' ? 'Último responsável desta loja. Se foi outra pessoa, toque em outro nome ou digite.' : '';
       };
-      $('#vLoja').addEventListener('change', upd);
+      $('#vLoja').addEventListener('change', () => { montarPartes(); upd(); });
       $('#vData').addEventListener('change', upd);
+      montarPartes();
       upd();
       if (!lojaId) $('#vLoja').focus();
     }
@@ -1418,6 +1465,8 @@ function saveVenda() {
   }
   S.salvando = true; setTimeout(() => { S.salvando = false; }, 1200);
   const venda = { VendaId: editing ? editing.id : uid(), Data: data, Loja: loja, Vendas: cents / 100, Ticket: +ticket, Responsavel: resp, HoraRegistro: new Date().toISOString() };
+  const pv = S.getPartes && S.getPartes();
+  if (pv) pv.forEach((x, i) => { venda['Vendas' + (i + 1)] = x; });
   const assinatura = S.sigPad.hasInk() ? S.sigPad.toDataURL() : '';
   // se já havia na fila uma versão não enviada, substitui
   const prev = S.queue.find(q => q.type === 'venda' && q.venda.VendaId === venda.VendaId);
@@ -1551,6 +1600,7 @@ function resizeImage(file, max) {
 
 /* ---------- Histórico ---------- */
 VIEWS.historico = () => {
+  if (isConsulta()) return VIEWS.painel();
   const abas = [['vendas', 'Vendas'], ['solic', 'Solicitações'], ['motivos', 'Motivos']].concat(isMaster() ? [['alteracoes', 'Alterações'], ['acessos', 'Acessos']] : []);
   const t = abas.some(a => a[0] === S.ui.histTab) ? S.ui.histTab : 'vendas';
   const segs = `<div class="chips" role="group" style="padding-top:0">${abas.map(([k, l]) => `<button class="chip" data-htab="${k}" aria-pressed="${t === k}">${l}</button>`).join('')}</div>`;
@@ -1753,9 +1803,11 @@ async function resolver(id, aprovar) {
 /* ---------- Painel ---------- */
 VIEWS.painel = () => {
   const d = S.data;
-  if (!isMaster()) return VIEWS.rota();
+  if (!veAnalises()) return VIEWS.rota();
   if (!d) return { html: topbar({ title: 'Painel' }) + '<main><div class="loading">Carregando…</div></main>' + navbar('painel') };
-  if (S.ui.painelAba === 'equipe') return VIEWS.equipe();
+  if (S.ui.painelAba === 'equipe' && isMaster()) return VIEWS.equipe();
+  if (S.ui.painelAba === 'com21') return VIEWS.analises();
+  if (S.ui.painelAba === 'mapa') return VIEWS.mapa();
   const meses = Object.keys(d.mensal).sort();
   const mes = S.ui.painelMes || today().slice(0, 7);
   const sum = m => { const o = d.mensal[m] || {}; let v = 0, t = 0, n = 0, lj = 0; for (const k in o) { v += o[k][0]; t += o[k][1]; n += o[k][2]; lj++; } return { v, t, n, lj }; };
@@ -1802,7 +1854,7 @@ VIEWS.painel = () => {
   const ult = []; for (let i = 11; i >= 0; i--) { const m = addMonth(mes, -i); ult.push({ m, v: sum(m).v }); }
 
   const html = `
-  ${topbar({ title: 'Painel', sub: 'Vendas declaradas pelas lojas' })}
+  ${topbar({ title: 'Painel', sub: 'Vendas coletadas pela auditoria' })}
   <main><div class="wrap">
     <div class="gutter" style="padding-top:14px">${painelAbas()}</div>
     <div class="gutter section" style="display:grid;gap:12px">
@@ -1956,6 +2008,712 @@ function barChart(items, kind) {
   return s + '</svg>';
 }
 
+/* Planta baixa (espaços retangulares por piso, gerados a partir da planta do shopping). luc/nome = sugestão inicial; o master troca no app. */
+window.MAPA_PLANTA = window.MAPA_PLANTA || {"L1":{"w":1900,"h":1445,"corredor":[[20,995,1170,360],[60,25,410,480],[1190,1215,520,210],[1190,985,540,140],[110,775,260,220],[240,1355,950,30],[430,695,60,300],[1710,1315,150,110],[1730,975,150,100]],"espacos":[{"id":"L1-01","x":65,"y":20,"w":410,"h":480,"luc":"001","nome":"Renner","vaga":false},{"id":"L1-02","x":110,"y":810,"w":80,"h":150,"luc":"104","nome":"Kopenhagen","vaga":false},{"id":"L1-03","x":275,"y":870,"w":90,"h":235,"luc":"101","nome":"Taco","vaga":false},{"id":"L1-04","x":445,"y":990,"w":85,"h":130,"luc":"111","nome":"Zeiss","vaga":false},{"id":"L1-05","x":530,"y":990,"w":95,"h":130,"luc":"112","nome":"Dalia Franco","vaga":false},{"id":"L1-06","x":625,"y":990,"w":130,"h":145,"luc":"113","nome":"Nação Rubro Negra","vaga":false},{"id":"L1-07","x":755,"y":990,"w":120,"h":215,"luc":"143","nome":"Hering Store","vaga":false},{"id":"L1-08","x":875,"y":990,"w":75,"h":215,"luc":"142","nome":"Melissa","vaga":false},{"id":"L1-09","x":950,"y":990,"w":95,"h":215,"luc":"141","nome":"Santa Lolla","vaga":false},{"id":"L1-10","x":1045,"y":990,"w":110,"h":215,"luc":"140","nome":"Fit store","vaga":false},{"id":"L1-11","x":1155,"y":990,"w":135,"h":130,"luc":"138","nome":"World Free","vaga":false},{"id":"L1-12","x":1290,"y":990,"w":135,"h":130,"luc":"136","nome":"Marias Ejje","vaga":false},{"id":"L1-13","x":1425,"y":990,"w":135,"h":130,"luc":"134","nome":"Brave","vaga":false},{"id":"L1-14","x":1560,"y":990,"w":145,"h":130,"luc":"132","nome":"Bless","vaga":false},{"id":"L1-15","x":1705,"y":990,"w":130,"h":90,"luc":"130","nome":"O Boticário","vaga":false},{"id":"L1-16","x":20,"y":1030,"w":170,"h":50,"luc":"105","nome":"X Case","vaga":false},{"id":"L1-17","x":20,"y":1080,"w":170,"h":90,"luc":"106","nome":"Puket","vaga":false},{"id":"L1-18","x":20,"y":1170,"w":170,"h":90,"luc":"107","nome":"AD","vaga":false},{"id":"L1-19","x":1560,"y":1180,"w":65,"h":25,"luc":"Q104","nome":"Hygge","vaga":false},{"id":"L1-20","x":1260,"y":1205,"w":70,"h":105,"luc":"122","nome":"Altezza Prata","vaga":false},{"id":"L1-21","x":1330,"y":1205,"w":130,"h":105,"luc":"124","nome":"Altezza Joias","vaga":false},{"id":"L1-22","x":1460,"y":1205,"w":100,"h":105,"luc":"126","nome":"Rubi Ótica e Joalheria","vaga":false},{"id":"L1-23","x":1625,"y":1205,"w":80,"h":55,"luc":"128B","nome":"Empadinhas Express","vaga":false},{"id":"L1-24","x":235,"y":1260,"w":370,"h":125,"luc":"109","nome":"Black Buffalo For Man","vaga":false},{"id":"L1-25","x":605,"y":1260,"w":175,"h":125,"luc":"114","nome":"Black Buffalo Relaxing","vaga":false},{"id":"L1-26","x":780,"y":1260,"w":170,"h":125,"luc":"116","nome":"Unisporte","vaga":false},{"id":"L1-27","x":950,"y":1260,"w":190,"h":125,"luc":"118","nome":"My place","vaga":false},{"id":"L1-28","x":1625,"y":1260,"w":80,"h":50,"luc":"128A","nome":"Bob's","vaga":false},{"id":"L1-29","x":155,"y":1315,"w":35,"h":40,"luc":"108","nome":"1Instante","vaga":false},{"id":"L1-30","x":1140,"y":1340,"w":485,"h":85,"luc":"","nome":"","vaga":true},{"id":"L1-31","x":1745,"y":1310,"w":120,"h":115,"luc":"129","nome":"Anacapri","vaga":false},{"id":"L1-32","x":1645,"y":1385,"w":100,"h":40,"luc":"127","nome":"Lupo","vaga":false}]},"L2":{"w":1895,"h":1455,"corredor":[[1280,985,590,450],[70,25,410,480],[20,805,330,550],[700,1005,580,200],[350,1005,350,100],[380,1275,320,100],[780,1205,340,50],[440,735,50,270],[160,500,110,310]],"espacos":[{"id":"L2-01","x":70,"y":20,"w":410,"h":485,"luc":"001","nome":"Renner","vaga":false},{"id":"L2-02","x":195,"y":545,"w":35,"h":50,"luc":"Q201","nome":"Cherry bomb","vaga":false},{"id":"L2-03","x":195,"y":735,"w":35,"h":20,"luc":"Q204","nome":"Sabores Belgas","vaga":false},{"id":"L2-04","x":25,"y":795,"w":135,"h":100,"luc":"222","nome":"Go Coffee","vaga":false},{"id":"L2-05","x":265,"y":795,"w":105,"h":210,"luc":"219/221","nome":"Ortobom pop-up","vaga":false},{"id":"L2-06","x":25,"y":895,"w":135,"h":110,"luc":"220","nome":"Gigante da Colina","vaga":false},{"id":"L2-07","x":265,"y":1005,"w":105,"h":100,"luc":"214","nome":"Avatim","vaga":false},{"id":"L2-08","x":455,"y":1005,"w":75,"h":120,"luc":"213","nome":"Espaço Laser","vaga":false},{"id":"L2-09","x":530,"y":1005,"w":100,"h":100,"luc":"212","nome":"Green Lab","vaga":false},{"id":"L2-10","x":700,"y":1005,"w":1175,"h":200,"luc":"205","nome":"Lojas Americanas","vaga":false},{"id":"L2-11","x":25,"y":1035,"w":170,"h":140,"luc":"217","nome":"Mr.Cat","vaga":false},{"id":"L2-12","x":370,"y":1055,"w":65,"h":70,"luc":"Q208","nome":"Mia Semi Joias","vaga":false},{"id":"L2-13","x":25,"y":1175,"w":170,"h":95,"luc":"216","nome":"Cacau Show","vaga":false},{"id":"L2-14","x":285,"y":1150,"w":65,"h":25,"luc":"Q205","nome":"Gotrix","vaga":false},{"id":"L2-15","x":405,"y":1175,"w":30,"h":30,"luc":"Q206","nome":"Toys Kids","vaga":false},{"id":"L2-16","x":455,"y":1175,"w":75,"h":30,"luc":"","nome":"","vaga":true},{"id":"L2-17","x":530,"y":1175,"w":35,"h":30,"luc":"Q208","nome":"Mia Semi Joias","vaga":false},{"id":"L2-18","x":575,"y":1175,"w":35,"h":30,"luc":"Q208","nome":"Mia Semi Joias","vaga":false},{"id":"L2-19","x":1280,"y":1205,"w":595,"h":230,"luc":"201","nome":"Cine Show","vaga":false},{"id":"L2-20","x":25,"y":1270,"w":170,"h":100,"luc":"215","nome":"Littera","vaga":false},{"id":"L2-21","x":230,"y":1270,"w":120,"h":100,"luc":"210","nome":"Espaço Facial","vaga":false},{"id":"L2-22","x":350,"y":1270,"w":85,"h":100,"luc":"209","nome":"Barbero Joel Rodrigues","vaga":false},{"id":"L2-23","x":435,"y":1270,"w":95,"h":100,"luc":"208","nome":"Mahogany","vaga":false},{"id":"L2-24","x":530,"y":1270,"w":80,"h":100,"luc":"207","nome":"Voltz","vaga":false},{"id":"L2-25","x":610,"y":1270,"w":90,"h":100,"luc":"206","nome":"Dra Marcia Filgueiras","vaga":false}]},"L3":{"w":1920,"h":1450,"corredor":[[290,1000,1580,370],[250,20,230,480],[20,790,150,560],[1130,1370,740,60],[70,20,180,210],[260,800,110,200],[430,730,60,270],[1430,970,470,30],[150,360,115,440]],"espacos":[{"id":"L3-01","x":260,"y":30,"w":205,"h":465,"luc":"03A09","nome":"Adventure Kids","vaga":false},{"id":"L3-02","x":165,"y":375,"w":35,"h":50,"luc":"Q301","nome":"Boliche Big Apple","vaga":false},{"id":"L3-03","x":200,"y":525,"w":25,"h":50,"luc":"Q302","nome":"Jotas Cabines Fotográficas","vaga":false},{"id":"L3-04","x":200,"y":685,"w":25,"h":50,"luc":"Q303","nome":"Hygge","vaga":false},{"id":"L3-05","x":25,"y":795,"w":140,"h":100,"luc":"307","nome":"","vaga":true},{"id":"L3-06","x":260,"y":795,"w":100,"h":100,"luc":"308","nome":"","vaga":true},{"id":"L3-07","x":25,"y":895,"w":90,"h":75,"luc":"","nome":"","vaga":true},{"id":"L3-08","x":115,"y":895,"w":50,"h":105,"luc":"","nome":"","vaga":true},{"id":"L3-09","x":260,"y":895,"w":100,"h":105,"luc":"308B","nome":"A Casa da Maçã","vaga":false},{"id":"L3-10","x":275,"y":1000,"w":85,"h":90,"luc":"","nome":"","vaga":true},{"id":"L3-11","x":360,"y":1000,"w":80,"h":90,"luc":"","nome":"","vaga":true},{"id":"L3-12","x":440,"y":1000,"w":90,"h":90,"luc":"","nome":"","vaga":true},{"id":"L3-13","x":645,"y":1000,"w":110,"h":90,"luc":"312","nome":"Tasca Da Manjerona","vaga":false},{"id":"L3-14","x":1425,"y":970,"w":450,"h":250,"luc":"201","nome":"Cine Show","vaga":false},{"id":"L3-15","x":25,"y":1030,"w":175,"h":60,"luc":"306","nome":"","vaga":true},{"id":"L3-16","x":25,"y":1090,"w":175,"h":90,"luc":"303B","nome":"Lume Café","vaga":false},{"id":"L3-17","x":25,"y":1180,"w":175,"h":175,"luc":"303A4","nome":"Baby Kids","vaga":false},{"id":"L3-18","x":290,"y":1150,"w":45,"h":30,"luc":"","nome":"Quiosque","vaga":false},{"id":"L3-19","x":360,"y":1180,"w":245,"h":175,"luc":"315","nome":"Vino!","vaga":false},{"id":"L3-20","x":605,"y":1180,"w":350,"h":210,"luc":"316","nome":"","vaga":true},{"id":"L3-21","x":1130,"y":1220,"w":745,"h":210,"luc":"201","nome":"Cine Show","vaga":false}]},"L4":{"w":1715,"h":1445,"corredor":[[25,1005,1640,350],[65,25,420,420],[25,795,350,210],[745,1355,950,70],[435,735,60,270],[265,445,220,60]],"espacos":[{"id":"L4-01","x":120,"y":20,"w":135,"h":105,"luc":"10","nome":"Arizona Grill","vaga":false},{"id":"L4-02","x":255,"y":20,"w":120,"h":105,"luc":"","nome":"","vaga":true},{"id":"L4-03","x":70,"y":155,"w":100,"h":85,"luc":"16","nome":"Milky Moo","vaga":false},{"id":"L4-04","x":345,"y":155,"w":135,"h":85,"luc":"12","nome":"Spoleto","vaga":false},{"id":"L4-05","x":345,"y":240,"w":135,"h":135,"luc":"13","nome":"Bob's","vaga":false},{"id":"L4-06","x":275,"y":375,"w":205,"h":130,"luc":"15","nome":"Santa Ceia Gastronomia","vaga":false},{"id":"L4-07","x":745,"y":995,"w":925,"h":430,"luc":"201","nome":"Cine Show","vaga":false},{"id":"L4-08","x":20,"y":1080,"w":180,"h":275,"luc":"","nome":"Expansão","vaga":true},{"id":"L4-09","x":235,"y":1080,"w":510,"h":300,"luc":"","nome":"Expansão","vaga":true}]}};
+
+/* ============================ Lojista (Com21), análises e mapa ============================ */
+const baseContrato = c => String(c == null ? '' : c).split('-')[0].trim();
+const variacao = (a, b) => (b ? (a / b - 1) * 100 : null);
+const pctTxt = (p, casas = 1) => p == null || !isFinite(p) ? '—' : (p > 0 ? '+' : p < 0 ? '−' : '') + Math.abs(p).toLocaleString('pt-BR', { maximumFractionDigits: casas }) + '%';
+const deltaTag = (p, lab, inverso) => p == null || !isFinite(p) ? '' : `<span class="d ${(inverso ? p <= 0 : p >= 0) ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'} ${Math.abs(p).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${lab}</span>`;
+const somaObj = o => Object.values(o || {}).reduce((s, v) => s + (+v || 0), 0);
+const totaisMes = o => { const r = {}; for (const k in (o || {})) r[k] = o[k][0]; return r; };
+const ablNum = l => parseFloat(String((l && l.ABL) || '').replace(',', '.')) || 0;
+const partesDe = l => String((l && l.Partes) || '').split(';').map(x => x.trim()).filter(Boolean).slice(0, 3);
+const tituloCase = s => String(s || '').toLowerCase().replace(/(^|[\s/(-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+
+async function loadAnal(force) {
+  if (!veAnalises() || S.analBusy) return;
+  if (!force && S.anal && Date.now() - (S.analAt || 0) < 20 * 60e3) return;
+  if (!DEMO && !navigator.onLine) { if (force) toast('Sem internet.'); return; }
+  S.analBusy = true; S.analErr = '';
+  if (force) refresh();
+  try {
+    const r = await api('analises');
+    delete r.ok;
+    S.anal = r; S.analAt = Date.now();
+    KV.set('anal', { r, at: S.analAt });
+  } catch (e) { S.analErr = e.message; }
+  S.analBusy = false;
+  refresh();
+}
+
+/* contrato -> lojas do app (ativas primeiro) */
+let lojaContratoCache = { ver: -1, map: null };
+function lojasPorContrato() {
+  if (lojaContratoCache.ver === S.ver && lojaContratoCache.map) return lojaContratoCache.map;
+  const m = new Map();
+  lojasAll().forEach(l => {
+    const c = baseContrato(l.Contrato); if (!c) return;
+    if (!m.has(c)) m.set(c, []);
+    m.get(c).push(l);
+  });
+  m.forEach(arr => arr.sort((a, b) => (a['Situação'] === 'Inativo') - (b['Situação'] === 'Inativo') || (partesDe(b).length - partesDe(a).length)));
+  lojaContratoCache = { ver: S.ver, map: m };
+  return m;
+}
+const lojaDoContrato = c => (lojasPorContrato().get(c) || [])[0] || null;
+function ablContrato(c) {
+  const ls = (lojasPorContrato().get(c) || []);
+  const at = ls.filter(l => l['Situação'] !== 'Inativo');
+  return (at.length ? at : ls).reduce((s, l) => s + ablNum(l), 0);
+}
+function nomeContrato(c) {
+  const l = lojaDoContrato(c);
+  if (l) return l.NomeFantasia;
+  const k = S.anal && S.anal.contratos[c];
+  return k ? tituloCase(k.nome) : 'Contrato ' + c;
+}
+
+/* dados do Com21 de um mês, com o mesmo período quando o mês ainda está incompleto */
+function com21Mes(m) {
+  const A = S.anal; if (!A) return null;
+  const parcial = !!(A.comp && A.comp.mes === m && A.comp.ate < daysIn(m));
+  return {
+    cur: totaisMes(A.mensal[m]),
+    raw: A.mensal[m] || {},
+    ly: parcial ? A.comp.ly : totaisMes(A.mensal[addMonth(m, -12)]),
+    pm: parcial ? A.comp.ant : totaisMes(A.mensal[addMonth(m, -1)]),
+    parcial, ate: parcial ? A.comp.ate : daysIn(m)
+  };
+}
+function mesesCom21() { return S.anal ? Object.keys(S.anal.mensal).sort() : []; }
+function mesAnalise() {
+  const ms = mesesCom21();
+  let m = S.ui.anMes;
+  if (!m || (ms.length && !ms.includes(m) && S.ui.painelAba !== 'mapa')) m = S.anal && S.anal.ultima ? S.anal.ultima.slice(0, 7) : today().slice(0, 7);
+  return m;
+}
+
+/* ---------- Gráfico de barras em pares (ano atual × ano anterior) ---------- */
+function pairChart(items) {
+  const W = 340, H = 160, top = 8, bottom = 22;
+  const max = Math.max(1, ...items.map(i => Math.max(i.a || 0, i.b || 0)));
+  const nice = (() => { const p = Math.pow(10, Math.floor(Math.log10(max))); const m = max / p; return [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(x => m <= x) * p; })();
+  const y = v => top + (H - top - bottom) * (1 - v / nice);
+  const bw = W / items.length;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico comparativo">`;
+  [0.5, 1].forEach(f => { s += `<line x1="0" x2="${W}" y1="${y(nice * f)}" y2="${y(nice * f)}" stroke="var(--line)" stroke-dasharray="3 3"/><text x="${W}" y="${y(nice * f) - 3}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(moneyShort(nice * f))}</text>`; });
+  s += `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--line)"/>`;
+  items.forEach((it, i) => {
+    const x = i * bw, w = bw * 0.36;
+    s += `<g data-bar="par" data-key="${esc(it.key)}" data-value="${it.a || 0}" data-extra="${it.b || 0}" style="cursor:pointer">
+      <rect x="${x}" y="${top}" width="${bw}" height="${H - top - bottom}" fill="transparent"/>
+      <rect x="${x + bw * 0.12}" y="${y(it.b || 0)}" width="${w}" height="${Math.max(it.b ? 1.5 : 0, y(0) - y(it.b || 0))}" rx="2" fill="var(--line)"/>
+      <rect x="${x + bw * 0.12 + w}" y="${y(it.a || 0)}" width="${w}" height="${Math.max(it.a ? 1.5 : 0, y(0) - y(it.a || 0))}" rx="2" fill="${it.hl ? 'var(--brand-strong)' : 'var(--brand)'}"/>
+      <text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle" font-size="9.5" fill="var(--muted)">${esc(it.label)}</text></g>`;
+  });
+  return s + '</svg>';
+}
+
+function semCom21Html(titulo) {
+  return `<div class="gutter section" style="display:grid;gap:12px">
+    ${S.analBusy ? '<div class="loading">Carregando dados do Com21…</div>' : S.analErr ? `<div class="alert bad"><div>${esc(S.analErr)}</div></div>` : `<div class="empty" style="padding:24px 8px">${ICON.chart}<div>${esc(titulo)}</div></div>`}
+    ${isMaster() && !S.analBusy ? `<button class="btn primary" data-act="importar">${ICON.sync}Importar relatório do Com21</button>` : ''}
+    ${!S.analBusy ? `<button class="btn" data-act="analRecarregar">${ICON.sync}Buscar dados de novo</button>` : ''}
+  </div>`;
+}
+
+/* ---------- Painel > Lojista (Com21) ---------- */
+VIEWS.analises = () => {
+  if (!S.anal && !S.analBusy && !S.analErr) loadAnal();
+  const A = S.anal;
+  const vazio = !A || !Object.keys(A.mensal || {}).length;
+  const head = `${topbar({ title: 'Painel', sub: 'Vendas declaradas no Com21', actions: `<button class="icon-btn" data-act="analRecarregar" aria-label="Atualizar análises" title="Atualizar análises">${ICON.chart}</button>` })}
+  <main><div class="wrap"><div class="gutter" style="padding-top:14px">${painelAbas()}</div>`;
+  if (vazio) return { html: head + semCom21Html(A ? 'Ainda não há vendas do Com21 na planilha.' : 'Carregando…') + `</div></main>${navbar('painel')}` };
+
+  const ms = mesesCom21();
+  const m = ms.includes(mesAnalise()) ? mesAnalise() : ms[ms.length - 1];
+  const D = com21Mes(m);
+  const lim = +A.limite || +cfg('div_limite') || 5;
+  const tot = somaObj(D.cur), tLy = somaObj(D.ly), tPm = somaObj(D.pm);
+  const per = D.parcial ? ` (1 a ${D.ate})` : '';
+  // SSS: mesmas lojas com venda nos dois períodos
+  let sA = 0, sB = 0, nS = 0;
+  for (const c in D.cur) { if (D.cur[c] > 0 && (D.ly[c] || 0) > 0) { sA += D.cur[c]; sB += D.ly[c]; nS++; } }
+  // venda por m²
+  let vM = 0, aM = 0;
+  for (const c in D.cur) { const a = ablContrato(c); if (a > 0 && D.cur[c] > 0) { vM += D.cur[c]; aM += a; } }
+  const nDecl = Object.values(D.cur).filter(v => v > 0).length;
+  // auditoria × lojista
+  const cz = (A.cruz || {})[m] || {};
+  let au = 0, lo = 0, diasCz = 0;
+  const div = Object.keys(cz).map(c => { const [a, b, n, nd] = cz[c]; au += a; lo += b; diasCz += n; return { c, a, b, n, nd, p: b ? (a - b) / b * 100 : (a ? 100 : 0) }; })
+    .sort((x, y) => Math.abs(y.p) - Math.abs(x.p) || y.nd - x.nd);
+  const acima = div.filter(x => Math.abs(x.p) > lim || x.nd > 0);
+  const divTotal = lo ? (au - lo) / lo * 100 : null;
+  // 13 meses
+  const serie = []; for (let i = 12; i >= 0; i--) { const mm = addMonth(m, -i); serie.push({ key: mm, label: MESES[+mm.slice(5) - 1].slice(0, 3), a: somaObj(totaisMes(A.mensal[mm])), b: somaObj(totaisMes(A.mensal[addMonth(mm, -12)])), hl: mm === m }); }
+  // dia da semana
+  const dw = Array.from({ length: 7 }, () => ({ s: 0, n: 0 }));
+  Object.keys(A.diario).forEach(k => { if (k.startsWith(m)) { const w = new Date(k + 'T12:00:00').getDay(); dw[w].s += A.diario[k]; dw[w].n++; } });
+  const dwItems = [1, 2, 3, 4, 5, 6, 0].map(w => ({ label: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'][w], value: dw[w].n ? dw[w].s / dw[w].n : 0, key: String(w), extra: dw[w].n }));
+  // ranking
+  const by = S.ui.anRank || 'vendas';
+  const linhas = Object.keys(D.cur).filter(c => D.cur[c] > 0).map(c => {
+    const a = ablContrato(c);
+    return { c, nome: nomeContrato(c), v: D.cur[c], m2: a ? D.cur[c] / a : null, cr: (D.ly[c] || 0) > 0 ? variacao(D.cur[c], D.ly[c]) : null, loja: lojaDoContrato(c) };
+  });
+  const rk = linhas.filter(r => by === 'vendas' ? true : by === 'm2' ? r.m2 != null : r.cr != null)
+    .sort((x, y) => by === 'vendas' ? y.v - x.v : by === 'm2' ? y.m2 - x.m2 : y.cr - x.cr);
+  const valR = r => by === 'vendas' ? r.v : by === 'm2' ? r.m2 : r.cr;
+  const maxR = Math.max(1, ...rk.map(r => Math.abs(valR(r))));
+  const mais = S.ui.anMais || {};
+  // por ramo
+  const ramo = {};
+  for (const c in D.cur) {
+    const k = S.anal.contratos[c]; const nm = tituloCase((k && k.ramo) || 'Sem ramo');
+    const o = ramo[nm] || (ramo[nm] = { v: 0, ly: 0 }); o.v += D.cur[c]; o.ly += D.ly[c] || 0;
+  }
+  const ramos = Object.entries(ramo).filter(([, o]) => o.v > 0).sort((x, y) => y[1].v - x[1].v);
+  // curva ABC
+  const ord = linhas.slice().sort((x, y) => y.v - x.v);
+  let acc = 0; const abc = { A: [], B: [], C: [] };
+  ord.forEach(r => { acc += r.v; const sh = tot ? acc / tot : 1; (sh <= 0.8 || !abc.A.length ? abc.A : sh <= 0.95 ? abc.B : abc.C).push(r); });
+  // altas e quedas (lojas com venda relevante no ano anterior)
+  const comp = linhas.filter(r => r.cr != null && (D.ly[r.c] || 0) >= 5000).sort((x, y) => y.cr - x.cr);
+  const altas = comp.slice(0, 5), quedas = comp.slice(-5).reverse().filter(r => r.cr < 0);
+  // contratos do Com21 sem loja no app
+  const semLoja = linhas.filter(r => !r.loja).sort((x, y) => y.v - x.v);
+  const ultTxt = A.ultima ? dBR(A.ultima) : '—';
+  const rowLink = r => r.loja ? `data-loja="${esc(r.loja.IdLoja)}" data-lojames="${m}"` : '';
+
+  const html = head + `
+    <div class="gutter section" style="display:grid;gap:12px">
+      <div class="month-nav">
+        <button class="cal-nav" data-act="anMes" data-mes="${addMonth(m, -1)}" ${m <= ms[0] ? 'disabled' : ''} aria-label="Mês anterior">${ICON.left}</button>
+        <strong>${esc(mesNome(m))}${D.parcial ? ` <span class="muted" style="font-weight:600;font-size:13px">até dia ${D.ate}</span>` : ''}</strong>
+        <button class="cal-nav" data-act="anMes" data-mes="${addMonth(m, 1)}" ${m >= ms[ms.length - 1] ? 'disabled' : ''} aria-label="Próximo mês">${ICON.right}</button>
+      </div>
+      <div class="kpis">
+        <div class="kpi wide"><span class="l">Vendas declaradas pelos lojistas</span><span class="v num">${money(tot)}</span>${deltaTag(variacao(tot, tLy), 'vs. ' + MESES[+m.slice(5) - 1] + '/' + (+m.slice(0, 4) - 1) + per)}${deltaTag(variacao(tot, tPm), 'vs. mês anterior' + per)}</div>
+        <div class="kpi"><span class="l">SSS (mesmas lojas)</span><span class="v num">${pctTxt(variacao(sA, sB))}</span><span class="d muted">${nS} lojas com venda nos dois anos</span></div>
+        <div class="kpi"><span class="l">Venda por m²</span><span class="v num">${aM ? money(vM / aM) : '—'}</span><span class="d muted">${aM ? int(aM) + ' m² com ABL cadastrada' : 'cadastre a ABL das lojas'}</span></div>
+        <div class="kpi"><span class="l">Lojas que declararam</span><span class="v num">${nDecl}</span><span class="d muted">com venda no mês</span></div>
+        <div class="kpi"><span class="l">Auditoria × lojista</span><span class="v num">${divTotal == null ? '—' : pctTxt(divTotal)}</span><span class="d ${acima.length ? 'down' : 'muted'}">${diasCz ? `${acima.length} loja${acima.length === 1 ? '' : 's'} fora do limite de ${String(lim).replace('.', ',')}%` : 'sem dias para comparar'}</span></div>
+      </div>
+      <div class="muted" style="font-size:12.5px">Com21 até ${ultTxt}${S.analAt ? ' · atualizado ' + new Date(S.analAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : ''}${S.analBusy ? ' · atualizando…' : ''}.${D.parcial ? ' Mês incompleto: as comparações usam o mesmo período (1 a ' + D.ate + ').' : ''} SSS compara só as lojas que venderam nos dois períodos.</div>
+      ${isMaster() ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn" data-act="importar">${ICON.sync}Importar Com21</button><button class="btn" data-act="faixas">${ICON.chart}Limites</button></div>` : ''}
+    </div>
+    <div class="gutter section">
+      <h3 class="h2">Últimos 13 meses</h3>
+      <div class="card chart"><div class="tip num" id="tipPar"><span style="display:inline-block;width:10px;height:10px;background:var(--brand);border-radius:2px"></span> ${esc(m.slice(0, 4))} e anteriores &nbsp; <span style="display:inline-block;width:10px;height:10px;background:var(--line);border-radius:2px"></span> mesmo mês do ano anterior. Toque num mês.</div>${pairChart(serie)}</div>
+    </div>
+    <div class="section">
+      <h3 class="h2 gutter">Auditoria × lojista <span style="text-transform:none;letter-spacing:0;font-weight:600">nos dias lançados pelos dois</span></h3>
+      <div class="list">${div.slice(0, mais.div ? 200 : 8).map(x => { const l = lojaDoContrato(x.c); const ruim = Math.abs(x.p) > lim || x.nd > 0; return `<button class="row" style="grid-template-columns:1fr auto" ${l ? `data-act="comparar" data-id="${esc(l.IdLoja)}" data-mes="${m}"` : ''}>
+        <div><div class="t">${esc(nomeContrato(x.c))}</div><div class="s">Auditoria ${moneyShort(x.a)} · lojista ${moneyShort(x.b)} · ${x.n} dia${x.n === 1 ? '' : 's'}${x.nd ? ` · <b style="color:var(--bad)">${x.nd} com diferença</b>` : ''}</div></div>
+        <div class="v num"><span class="status ${ruim ? 'st-no' : 'st-ok'}">${pctTxt(x.p)}</span></div></button>`; }).join('') || '<div class="empty">Nenhum dia com lançamento da auditoria e do lojista neste mês.</div>'}
+      ${div.length > 8 ? `<button class="more" data-act="anMais" data-k="div">${mais.div ? 'Mostrar menos' : 'Ver todas as ' + div.length + ' lojas'}</button>` : ''}</div>
+      <div class="gutter muted" style="font-size:12px;margin-top:6px">Diferença = (auditoria − lojista) ÷ lojista, somando só os dias que existem nos dois. Um dia conta como "com diferença" quando passa de ${String(lim).replace('.', ',')}%. Toque para ver dia a dia.</div>
+    </div>
+    <div class="section">
+      <div class="gutter" style="display:grid;gap:10px;margin-bottom:10px">
+        <h3 class="h2" style="margin:0">Ranking de lojas</h3>
+        <div class="seg">${[['vendas', 'Vendas'], ['m2', 'R$ por m²'], ['cresc', 'Cresc. a/a']].map(([k, l]) => `<button data-anrank="${k}" aria-pressed="${by === k}">${l}</button>`).join('')}</div>
+      </div>
+      <div class="list">${rk.slice(0, mais.rank ? 300 : 10).map((r, i) => { const v = valR(r); return `<button class="hbar" ${rowLink(r)}><span class="n"><span class="rank num">${i + 1}</span>${esc(r.nome)}</span><span class="val num">${by === 'vendas' ? moneyShort(v) : by === 'm2' ? money(v) : pctTxt(v)}</span><span class="bar"><i style="width:${(Math.abs(v) / maxR * 100).toFixed(1)}%;${by === 'cresc' && v < 0 ? 'background:var(--bad)' : ''}"></i></span></button>`; }).join('') || '<div class="empty">Sem dados.</div>'}
+      ${rk.length > 10 ? `<button class="more" data-act="anMais" data-k="rank">${mais.rank ? 'Mostrar só as 10 primeiras' : 'Ver todas as ' + rk.length + ' lojas'}</button>` : ''}</div>
+      ${by === 'm2' ? '<div class="gutter muted" style="font-size:12px;margin-top:6px">Só lojas com ABL (m²) no cadastro.</div>' : by === 'cresc' ? `<div class="gutter muted" style="font-size:12px;margin-top:6px">Comparado com ${MESES[+m.slice(5) - 1]} de ${+m.slice(0, 4) - 1}${per}.</div>` : ''}
+    </div>
+    <div class="section">
+      <h3 class="h2 gutter">Altas e quedas sobre o ano anterior</h3>
+      <div class="list">${altas.concat(quedas).map(r => `<button class="row" style="grid-template-columns:1fr auto" ${rowLink(r)}><div><div class="t">${esc(r.nome)}</div><div class="s">${moneyShort(r.v)} · antes ${moneyShort(D.ly[r.c])}</div></div><div class="v num ${r.cr >= 0 ? 'up' : 'down'}">${pctTxt(r.cr)}</div></button>`).join('') || '<div class="empty">Sem lojas para comparar com o ano anterior.</div>'}</div>
+    </div>
+    <div class="section">
+      <h3 class="h2 gutter">Por ramo de atividade</h3>
+      <div class="list">${ramos.slice(0, mais.ramo ? 99 : 8).map(([n, o]) => `<div class="hbar"><span class="n">${esc(n)}</span><span class="val num">${moneyShort(o.v)} <span class="muted" style="font-weight:600">${tot ? Math.round(o.v / tot * 100) : 0}%</span>${o.ly ? ` <span class="${o.v >= o.ly ? 'up' : 'down'}" style="font-size:12px">${pctTxt(variacao(o.v, o.ly), 0)}</span>` : ''}</span><span class="bar"><i style="width:${(o.v / (ramos[0][1].v || 1) * 100).toFixed(1)}%"></i></span></div>`).join('')}
+      ${ramos.length > 8 ? `<button class="more" data-act="anMais" data-k="ramo">${mais.ramo ? 'Mostrar menos' : 'Ver os ' + ramos.length + ' ramos'}</button>` : ''}</div>
+    </div>
+    <div class="gutter section">
+      <h3 class="h2">Curva ABC</h3>
+      <div class="kpis">${['A', 'B', 'C'].map(k => `<div class="kpi"><span class="l">Curva ${k}</span><span class="v num">${abc[k].length} lojas</span><span class="d muted">${tot ? Math.round(abc[k].reduce((s, r) => s + r.v, 0) / tot * 100) : 0}% das vendas</span></div>`).join('')}</div>
+      <div class="muted" style="font-size:12.5px;margin-top:8px">A = lojas que somam 80% das vendas; B = os 15% seguintes; C = os últimos 5%.</div>
+      <div class="list" style="margin-top:10px;border-radius:12px">${abc.A.map(r => `<button class="hbar" ${rowLink(r)}><span class="n"><span class="rank num" style="background:var(--brand);color:var(--surface)">A</span>${esc(r.nome)}</span><span class="val num">${moneyShort(r.v)} <span class="muted" style="font-weight:600">${tot ? (r.v / tot * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) : 0}%</span></span></button>`).join('')}</div>
+    </div>
+    <div class="gutter section">
+      <h3 class="h2">Média por dia da semana</h3>
+      <div class="card chart"><div class="tip num" id="tipDow">Toque num dia.</div>${barChart(dwItems, 'dow')}</div>
+    </div>
+    ${isMaster() && semLoja.length ? `<div class="section"><h3 class="h2 gutter">No Com21, mas sem loja no app <span>${semLoja.length}</span></h3>
+      <div class="list">${semLoja.slice(0, mais.sem ? 99 : 5).map(r => { const k = A.contratos[r.c] || {}; return `<div class="row" style="grid-template-columns:1fr auto"><div><div class="t">${esc(tituloCase(k.nome || r.c))}</div><div class="s">Contrato ${esc(r.c)} · LUC ${esc(k.luc || '—')}</div></div><div class="v num">${moneyShort(r.v)}</div></div>`; }).join('')}
+      ${semLoja.length > 5 ? `<button class="more" data-act="anMais" data-k="sem">${mais.sem ? 'Mostrar menos' : 'Ver todos'}</button>` : ''}</div>
+      <div class="gutter muted" style="font-size:12px;margin-top:6px">Para ligar, preencha o Contrato no cadastro da loja (o número do Com21).</div></div>` : ''}
+  </div></main>
+  ${navbar('painel')}`;
+  return {
+    html,
+    mount() {
+      $$('[data-bar]').forEach(b => b.addEventListener('click', () => {
+        const kind = b.dataset.bar, key = b.dataset.key;
+        $$('[data-bar="' + kind + '"]').forEach(x => x.setAttribute('opacity', x === b ? '1' : '.55'));
+        if (kind === 'par') $('#tipPar').textContent = `${mesNome(key)}: ${money(+b.dataset.value)} · ano anterior ${money(+b.dataset.extra)} (${pctTxt(variacao(+b.dataset.value, +b.dataset.extra))})`;
+        if (kind === 'dow') $('#tipDow').textContent = `${DOW[+key]}: média de ${money(+b.dataset.value)} (${b.dataset.extra} dia${+b.dataset.extra === 1 ? '' : 's'})`;
+      }));
+    }
+  };
+};
+
+/* ---------- Loja: cartão com o Com21 ---------- */
+function cardCom21Loja(l, mes) {
+  const c = baseContrato(l.Contrato);
+  if (!S.anal) { loadAnal(); return ''; }
+  if (!c) return `<div class="gutter section"><div class="muted" style="font-size:12.5px">Sem contrato no cadastro: não dá para comparar com o Com21.</div></div>`;
+  const D = com21Mes(mes);
+  const lojista = D.cur[c];
+  const cz = ((S.anal.cruz || {})[mes] || {})[c];
+  const lim = +S.anal.limite || 5;
+  const p = cz && cz[1] ? (cz[0] - cz[1]) / cz[1] * 100 : null;
+  const partes = D.raw[c] && partesDe(l).length ? partesDe(l).map((n, i) => `${n} ${moneyShort(D.raw[c][i + 1])}`).join(' · ') : '';
+  if (lojista == null && !cz) return `<div class="gutter section"><div class="card" style="padding:12px 14px;display:grid;gap:4px"><b>Lojista (Com21)</b><span class="muted" style="font-size:13px">Sem vendas declaradas em ${esc(mesNome(mes))}${S.anal.ultima ? ' (Com21 até ' + dBR(S.anal.ultima) + ')' : ''}.</span></div></div>`;
+  return `<div class="gutter section"><div class="card" style="padding:14px;display:grid;gap:8px">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><b>Lojista (Com21)</b><span class="muted" style="font-size:12px">até ${esc(dBR(S.anal.ultima))}</span></div>
+    <div class="num" style="font-size:22px;font-weight:800">${money(lojista || 0)}${deltaTag(variacao(lojista || 0, D.ly[c]), 'vs. ano ant.' + (D.parcial ? ' (mesmo período)' : ''))}</div>
+    ${partes ? `<div class="muted" style="font-size:12.5px">${esc(partes)}</div>` : ''}
+    ${cz ? `<div style="font-size:13.5px">Nos <b>${cz[2]}</b> dias lançados pelos dois: auditoria <b>${money(cz[0])}</b> × lojista <b>${money(cz[1])}</b> <span class="status ${Math.abs(p) > lim || cz[3] ? 'st-no' : 'st-ok'}" style="margin-left:4px">${pctTxt(p)}</span>${cz[3] ? `<br><span style="color:var(--bad);font-size:12.5px">${cz[3]} dia${cz[3] > 1 ? 's' : ''} com diferença acima de ${String(lim).replace('.', ',')}%</span>` : ''}</div>` : '<div class="muted" style="font-size:12.5px">Nenhum dia com lançamento dos dois para comparar.</div>'}
+    <button class="btn" data-act="comparar" data-id="${esc(l.IdLoja)}" data-mes="${mes}">${ICON.cal}Comparar dia a dia</button>
+  </div></div>`;
+}
+
+/* ---------- Comparar dia a dia (auditoria × Com21) ---------- */
+VIEWS.comparar = (p) => {
+  const l = lojaById(p.id);
+  if (!l) return { html: topbar({ title: 'Comparar', backBtn: true }) + '<div class="empty">Loja não encontrada.</div>' };
+  const c = baseContrato(l.Contrato);
+  S.lojCache = S.lojCache || {};
+  const dados = S.lojCache[c];
+  if (!dados && !(S.lojBusy || {})[c]) {
+    S.lojBusy = Object.assign({}, S.lojBusy, { [c]: true });
+    api('lojistaContrato', { contrato: c }).then(r => { S.lojCache[c] = r; }).catch(e => { S.lojCache[c] = { erro: e.message }; }).finally(() => { S.lojBusy[c] = false; refresh(); });
+  }
+  const mes = p.mes || today().slice(0, 7);
+  const lim = (S.anal && +S.anal.limite) || +cfg('div_limite') || 5;
+  const M = merged();
+  let corpo = '';
+  if (!dados) corpo = '<div class="loading">Buscando os dados do Com21…</div>';
+  else if (dados.erro) corpo = `<div class="gutter"><div class="alert bad"><div>${esc(dados.erro)}</div></div></div>`;
+  else {
+    const loj = {}; dados.lojista.forEach(x => { if (x[0].startsWith(mes)) loj[x[0]] = x; });
+    const partes = partesDe(l);
+    let sa = 0, sl = 0;
+    const linhas = [];
+    for (let d = daysIn(mes); d >= 1; d--) {
+      const k = mes + '-' + pad(d);
+      if (k > today()) continue;
+      const au = k in dados.auditoria ? dados.auditoria[k] : (lojasPorContrato().get(c) || []).reduce((s, x) => { const v = M.byLojaData.get(x.IdLoja + '|' + k); return v ? (s || 0) + (+v.vendas || 0) : s; }, null);
+      const lo = loj[k] ? loj[k][1] : null;
+      if (au == null && lo == null) continue;
+      const pd = au != null && lo != null ? (lo ? (au - lo) / lo * 100 : (au ? 100 : 0)) : null;
+      if (pd != null) { sa += au; sl += lo; }
+      linhas.push(`<div class="row" style="grid-template-columns:1fr auto">
+        <div><div class="t">${esc(diaLongo(k))}</div><div class="s">Auditoria ${au == null ? '<b>sem lançamento</b>' : money(au)} · lojista ${lo == null ? '<b>não declarou</b>' : money(lo)}${lo != null && partes.length ? '<br>' + partes.map((n, i) => n + ' ' + money(loj[k][i + 2])).join(' · ') : ''}</div></div>
+        <div class="v">${pd == null ? '<span class="status" style="background:var(--soft);color:var(--muted)">—</span>' : `<span class="status ${Math.abs(pd) > lim ? 'st-no' : 'st-ok'}">${pctTxt(pd)}</span>`}</div></div>`);
+    }
+    corpo = `<div class="gutter section"><div class="kpis">
+        <div class="kpi"><span class="l">Auditoria</span><span class="v num">${money(sa)}</span><span class="d muted">dias com os dois</span></div>
+        <div class="kpi"><span class="l">Lojista</span><span class="v num">${money(sl)}</span><span class="d muted">mesmos dias</span></div>
+        <div class="kpi wide"><span class="l">Diferença</span><span class="v num">${sl ? pctTxt((sa - sl) / sl * 100) : '—'}</span><span class="d muted">limite aceitável por dia: ${String(lim).replace('.', ',')}%</span></div></div></div>
+      <div class="list">${linhas.join('') || '<div class="empty">Sem dados neste mês.</div>'}</div>`;
+  }
+  const html = `${topbar({ title: l.NomeFantasia, sub: 'Auditoria × lojista (Com21)', backBtn: true })}
+  <main><div class="wrap">
+    <div class="gutter section"><div class="month-nav">
+      <button class="cal-nav" data-act="lojaMes" data-mes="${addMonth(mes, -1)}" aria-label="Mês anterior">${ICON.left}</button>
+      <strong>${esc(mesNome(mes))}</strong>
+      <button class="cal-nav" data-act="lojaMes" data-mes="${addMonth(mes, 1)}" ${mes >= today().slice(0, 7) ? 'disabled' : ''} aria-label="Próximo mês">${ICON.right}</button></div></div>
+    ${corpo}
+  </div></main>`;
+  return { html };
+};
+
+/* ---------- Mapa de calor ---------- */
+const lucNorm = s => String(s || '').toUpperCase().replace(/[+\s]/g, '').replace(/^0+(?=[0-9A-Z])/, '');
+function lojaPorLuc(luc) {
+  const n = lucNorm(luc); if (!n) return null;
+  const cand = lojasAll().filter(l => { const x = lucNorm(l.Luc); return x === n || (x.startsWith(n) && !/[0-9]/.test(x.charAt(n.length))) || x.split('/')[0] === n; });
+  cand.sort((a, b) => (a['Situação'] === 'Inativo') - (b['Situação'] === 'Inativo') || ehEventual(a) - ehEventual(b) || partesDe(b).length - partesDe(a).length);
+  return cand[0] || null;
+}
+function contratoPorLuc(luc) {
+  if (!S.anal) return '';
+  const n = lucNorm(luc); if (!n) return '';
+  let best = '', dt = '';
+  for (const [c, k] of Object.entries(S.anal.contratos)) { if (lucNorm(k.luc) === n && k.ultima > dt) { best = c; dt = k.ultima; } }
+  return best;
+}
+function mapaLinhas() { const o = {}; ((S.data && S.data.mapa) || []).forEach(r => { o[r.Espaco] = r; }); return o; }
+function resolverEspaco(e, linhas) {
+  const r = (linhas || mapaLinhas())[e.id];
+  if (r) {
+    if (r.IdLoja) { const l = lojaById(r.IdLoja); if (l) return { loja: l, contrato: baseContrato(l.Contrato), nome: l.NomeFantasia, escolhido: true }; }
+    if (r.Contrato) return { loja: lojaDoContrato(r.Contrato), contrato: r.Contrato, nome: nomeContrato(r.Contrato), escolhido: true };
+    return { vazio: true, nome: r.Rotulo || 'Disponível', escolhido: true };
+  }
+  if (e.vaga) return { vazio: true, nome: e.nome === 'Expansão' ? 'Expansão' : 'Disponível' };
+  const l = lojaPorLuc(e.luc);
+  if (l) return { loja: l, contrato: baseContrato(l.Contrato), nome: l.NomeFantasia };
+  const c = contratoPorLuc(e.luc);
+  if (c) return { contrato: c, nome: nomeContrato(c) };
+  return { nome: e.nome || ('LUC ' + e.luc), semLoja: true };
+}
+const MET = {
+  vendas: { nome: 'Vendas', ks: ['mapa_vendas_verm', 'mapa_vendas_verde'], fmt: v => kShort(v).replace('mi', 'M').replace('k', 'K'), unid: v => moneyShort(v) },
+  m2: { nome: 'R$ por m²', ks: ['mapa_m2_verm', 'mapa_m2_verde'], fmt: v => int(v), unid: v => money(v) + '/m²' },
+  cresc: { nome: 'Cresc. a/a', ks: ['mapa_cresc_verm', 'mapa_cresc_verde'], fmt: v => pctTxt(v, 0), unid: v => pctTxt(v) },
+  div: { nome: 'Divergência', ks: ['mapa_div_verm', 'mapa_div_verde'], fmt: v => pctTxt(v, 0).replace('+', ''), unid: v => pctTxt(v).replace('+', ''), inverso: true }
+};
+function faixa(met, v) {
+  if (v == null || !isFinite(v)) return 'na';
+  const [kr, kg] = MET[met].ks; const r = +cfg(kr), g = +cfg(kg);
+  if (MET[met].inverso) return v <= g ? 'ok' : v > r ? 'bad' : 'mid';
+  return v < r ? 'bad' : v >= g ? 'ok' : 'mid';
+}
+function legendaFaixas(met) {
+  const [kr, kg] = MET[met].ks; const r = +cfg(kr), g = +cfg(kg);
+  const f = met === 'vendas' ? moneyShort : met === 'm2' ? (v => money(v)) : (v => String(v).replace('.', ',') + '%');
+  const it = MET[met].inverso
+    ? [['ok', 'até ' + f(g)], ['mid', f(g) + ' a ' + f(r)], ['bad', 'acima de ' + f(r)]]
+    : [['bad', 'abaixo de ' + f(r)], ['mid', f(r) + ' a ' + f(g)], ['ok', f(g) + ' ou mais']];
+  return it.concat([['na', 'sem dados / disponível']]).map(([k, t]) => `<span><i class="hm-${k}"></i>${esc(t)}</span>`).join('');
+}
+/* valor de um espaço: fonte 'com21' (lojista) ou 'aud' (auditoria) */
+function valoresEspaco(res, m, fonte) {
+  const out = { vendas: null, m2: null, cresc: null, div: null };
+  if (!res || res.vazio || (!res.contrato && !res.loja)) return out;
+  const c = res.contrato;
+  const abl = c ? ablContrato(c) : ablNum(res.loja);
+  if (fonte === 'aud') {
+    const ids = c ? (lojasPorContrato().get(c) || []).map(l => l.IdLoja) : [res.loja.IdLoja];
+    const tot = mm => { const o = (S.data && S.data.mensal[mm]) || {}; let s = null; ids.forEach(id => { if (o[id]) s = (s || 0) + o[id][0]; }); return s; };
+    out.vendas = tot(m);
+    const fechado = m < today().slice(0, 7);
+    const ly = tot(addMonth(m, -12));
+    if (out.vendas != null && fechado && ly) out.cresc = variacao(out.vendas, ly);
+  } else if (S.anal && c) {
+    const D = com21Mes(m);
+    out.vendas = c in D.cur ? D.cur[c] : null;
+    if (out.vendas != null && D.ly[c]) out.cresc = variacao(out.vendas, D.ly[c]);
+  }
+  if (out.vendas != null && abl > 0) out.m2 = out.vendas / abl;
+  if (S.anal && c) { const cz = ((S.anal.cruz || {})[m] || {})[c]; if (cz && cz[1]) out.div = Math.abs(cz[0] - cz[1]) / cz[1] * 100; }
+  return out;
+}
+
+VIEWS.mapa = () => {
+  const P = window.MAPA_PLANTA;
+  if (!S.anal && !S.analBusy && !S.analErr) loadAnal();
+  const pisos = P ? Object.keys(P) : [];
+  const piso = pisos.includes(S.ui.mapaPiso) ? S.ui.mapaPiso : pisos[0];
+  const met = S.ui.mapaMet || 'vendas';
+  let fonte = S.ui.mapaFonte || (S.anal && S.anal.ultima ? 'com21' : 'aud');
+  if (met === 'div') fonte = 'com21';
+  const ms = fonte === 'com21' ? mesesCom21() : Object.keys((S.data && S.data.mensal) || {}).sort();
+  let m = S.ui.anMes || (fonte === 'com21' && S.anal && S.anal.ultima ? S.anal.ultima.slice(0, 7) : today().slice(0, 7));
+  if (ms.length && !ms.includes(m)) m = ms[ms.length - 1];
+  const edit = S.ui.mapaEdit && isMaster();
+  const head = `${topbar({ title: 'Painel', sub: 'Mapa de calor por piso' })}
+  <main><div class="wrap"><div class="gutter" style="padding-top:14px">${painelAbas()}</div>`;
+  if (!P) return { html: head + '<div class="empty">Planta não encontrada no app.</div></div></main>' + navbar('painel') };
+  const F = P[piso];
+  const linhasMapa = mapaLinhas();
+  const itens = F.espacos.map(e => { const r = resolverEspaco(e, linhasMapa); const vals = valoresEspaco(r, m, fonte); return { e, r, vals, v: vals[met] }; });
+  // rótulo só no maior pedaço de cada loja
+  const chave = it => it.r.loja ? 'L' + it.r.loja.IdLoja : it.r.contrato ? 'C' + it.r.contrato : 'E' + it.e.id;
+  const maior = {};
+  itens.forEach(it => { const k = chave(it); if (!maior[k] || it.e.w * it.e.h > maior[k].e.w * maior[k].e.h) maior[k] = it; });
+  const zoom = S.ui.mapaZoom || 1;
+  const sel = S.ui.mapaSel ? itens.find(it => it.e.id === S.ui.mapaSel) : null;
+  let svg = `<svg viewBox="0 0 ${F.w} ${F.h}" class="planta" style="width:${zoom * 100}%" role="img" aria-label="Planta do piso ${esc(piso)}">`;
+  F.corredor.forEach(c => { svg += `<rect x="${c[0]}" y="${c[1]}" width="${c[2]}" height="${c[3]}" class="hm-corr"/>`; });
+  itens.forEach(it => {
+    const { e } = it;
+    const fx = edit ? (it.r.vazio ? 'na' : it.r.semLoja ? 'na' : 'edit') : (it.r.vazio ? 'na' : faixa(met, it.v));
+    svg += `<g data-esp="${e.id}" style="cursor:pointer"><rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" class="hm-${fx}${sel && sel.e.id === e.id ? ' hm-sel' : ''}"/>`;
+    const lab = edit ? (it.r.vazio ? (it.r.nome === 'Expansão' ? 'Expansão' : 'Vago') : it.r.nome) : (it.v == null || maior[chave(it)] !== it ? '' : MET[met].fmt(it.v));
+    if (lab) {
+      const txt = edit ? lab.slice(0, Math.max(3, Math.floor(e.w / 17))) : lab;
+      const fs = Math.min(edit ? 30 : 44, e.w / (txt.length * 0.6 + 0.4), e.h * 0.42);
+      if (fs >= (edit ? 12 : 15)) svg += `<text x="${e.x + e.w / 2}" y="${e.y + e.h / 2 + fs * 0.36}" font-size="${fs.toFixed(0)}" class="hm-txt">${esc(txt)}</text>`;
+    }
+    svg += '</g>';
+  });
+  svg += '</svg>';
+  const lista = itens.filter(it => !it.r.vazio && maior[chave(it)] === it).sort((a, b) => (b.v == null ? -Infinity : b.v) - (a.v == null ? -Infinity : a.v));
+  const vagos = itens.filter(it => it.r.vazio).length;
+  const selHtml = sel ? (() => {
+    const r = sel.r, v = sel.vals;
+    return `<div class="card" style="padding:14px;display:grid;gap:8px;border-left:6px solid var(--hm-${r.vazio ? 'na' : faixa(met, sel.v)})">
+      <div style="display:flex;justify-content:space-between;gap:8px"><div><b style="font-size:16px">${esc(r.nome)}</b><div class="muted" style="font-size:12.5px">Espaço ${esc(sel.e.id)}${sel.e.luc ? ' · LUC na planta ' + esc(sel.e.luc) : ''}${r.escolhido ? ' · escolhido pelo master' : ''}</div></div><button class="icon-btn" data-act="mapaFechar" aria-label="Fechar">${ICON.x}</button></div>
+      ${r.vazio ? '<span class="muted">Espaço sem loja.</span>' : `<div class="kpis" style="grid-template-columns:1fr 1fr">${Object.keys(MET).map(k => `<div class="kpi" style="padding:10px"><span class="l">${MET[k].nome}</span><span class="v num" style="font-size:17px">${v[k] == null ? '—' : MET[k].unid(v[k])}</span></div>`).join('')}</div>`}
+      <div style="display:grid;grid-template-columns:${r.loja && isMaster() ? '1fr 1fr' : '1fr'};gap:8px">
+        ${r.loja ? `<button class="btn" data-loja="${esc(r.loja.IdLoja)}" data-lojames="${m}">${ICON.store}Abrir loja</button>` : ''}
+        ${isMaster() ? `<button class="btn" data-act="mapaTrocar" data-id="${esc(sel.e.id)}">${ICON.edit}Trocar loja</button>` : ''}
+      </div></div>`;
+  })() : '';
+  const html = head + `
+    <div class="gutter section" style="display:grid;gap:10px">
+      <div class="seg">${pisos.map(p => `<button data-mpiso="${p}" aria-pressed="${p === piso}">${p}</button>`).join('')}</div>
+      <div class="seg" style="font-size:12.5px">${Object.keys(MET).map(k => `<button data-mmet="${k}" aria-pressed="${met === k}">${MET[k].nome}</button>`).join('')}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${met === 'div' ? '<span class="muted" style="font-size:12.5px">Divergência compara auditoria × lojista</span>' : `<div class="seg" style="flex:1;min-width:220px;font-size:12.5px">${[['com21', 'Lojista (Com21)'], ['aud', 'Auditoria']].map(([k, l]) => `<button data-mfonte="${k}" aria-pressed="${fonte === k}">${l}</button>`).join('')}</div>`}
+      </div>
+      <div class="month-nav">
+        <button class="cal-nav" data-act="anMes" data-mes="${addMonth(m, -1)}" ${ms.length && m <= ms[0] ? 'disabled' : ''} aria-label="Mês anterior">${ICON.left}</button>
+        <strong>${esc(mesNome(m))}${fonte === 'com21' && S.anal && S.anal.comp && S.anal.comp.mes === m && S.anal.comp.ate < daysIn(m) ? ` <span class="muted" style="font-weight:600;font-size:13px">até dia ${S.anal.comp.ate}</span>` : ''}</strong>
+        <button class="cal-nav" data-act="anMes" data-mes="${addMonth(m, 1)}" ${ms.length && m >= ms[ms.length - 1] ? 'disabled' : ''} aria-label="Próximo mês">${ICON.right}</button>
+      </div>
+      ${fonte === 'com21' && !S.anal ? `<div class="alert warn"><div>${S.analBusy ? 'Carregando os dados do Com21…' : 'Sem dados do Com21 neste aparelho ainda.'}</div></div>` : ''}
+      ${edit ? '<div class="alert warn"><div><b>Modo edição.</b> Toque num espaço para escolher a loja que fica nele. Os nomes mostram a loja atual de cada espaço.</div></div>' : ''}
+    </div>
+    <div class="planta-wrap gutter"><div class="planta-scroll">${svg}</div>
+      <div class="planta-zoom">${[[1, '1×'], [1.7, '2×'], [2.6, '3×']].map(([z, l]) => `<button data-act="mapaZoom" data-z="${z}" aria-pressed="${zoom === z}">${l}</button>`).join('')}</div></div>
+    <div class="gutter" style="display:grid;gap:10px;padding-top:10px">
+      ${edit ? '' : `<div class="legend hm-legend">${legendaFaixas(met)}</div>`}
+      ${selHtml}
+      ${isMaster() ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><button class="btn ${edit ? 'primary' : ''}" data-act="mapaEdit">${ICON.edit}${edit ? 'Concluir edição' : 'Escolher lojas'}</button><button class="btn" data-act="faixas">${ICON.chart}Faixas de cor</button></div>` : ''}
+    </div>
+    <div class="section">
+      <h3 class="h2 gutter">Lojas do ${esc(piso)} <span>${lista.length}${vagos ? ' · ' + vagos + ' espaço' + (vagos > 1 ? 's' : '') + ' vago' + (vagos > 1 ? 's' : '') : ''}</span></h3>
+      <div class="list">${lista.map(it => `<button class="row" style="grid-template-columns:auto 1fr auto;gap:12px" data-esp="${it.e.id}"><span class="hm-dot hm-${faixa(met, it.v)}"></span><div><div class="t">${esc(it.r.nome)}</div><div class="s">${it.r.loja ? 'LUC ' + esc(it.r.loja.Luc) : it.r.contrato ? 'Contrato ' + esc(it.r.contrato) : 'sem loja ligada'}</div></div><div class="v num">${it.v == null ? '—' : esc(MET[met].unid(it.v))}</div></button>`).join('')}</div>
+    </div>
+  </div></main>
+  ${navbar('painel')}`;
+  return { html };
+};
+
+/* ---------- Escolher a loja de um espaço (master) ---------- */
+VIEWS.mapaEspaco = (p) => {
+  const P = window.MAPA_PLANTA || {};
+  let e = null; Object.values(P).forEach(f => f.espacos.forEach(x => { if (x.id === p.id) e = x; }));
+  if (!e || !isMaster()) return { html: topbar({ title: 'Espaço', backBtn: true }) + '<div class="empty">Espaço não encontrado.</div>' };
+  const r = resolverEspaco(e);
+  const sug = (() => { const x = Object.assign({}, e); return resolverEspaco(x, {}); })();
+  const piso = p.id.slice(0, 2);
+  const ls = lojasAll().slice().sort((a, b) => (a['Situação'] === 'Inativo') - (b['Situação'] === 'Inativo') || ((a.Piso === piso) ? 0 : 1) - ((b.Piso === piso) ? 0 : 1) || String(a.Luc).localeCompare(String(b.Luc), 'pt-BR', { numeric: true }));
+  const contratosLivres = S.anal ? Object.keys(S.anal.contratos).filter(c => !lojaDoContrato(c)).sort((a, b) => (S.anal.contratos[b].ultima || '').localeCompare(S.anal.contratos[a].ultima || '')) : [];
+  const opt = (val, t, s, on) => `<button class="row" style="grid-template-columns:1fr auto" data-act="escolher" data-val="${esc(val)}" data-busca="${esc(norm(t + ' ' + s))}"><div><div class="t">${esc(t)}</div><div class="s">${esc(s)}</div></div><div class="v">${on ? '<span class="status st-ok">Atual</span>' : ''}</div></button>`;
+  const html = `${topbar({ title: 'Espaço ' + p.id, sub: 'Qual loja fica aqui?', backBtn: true })}
+  <main><div class="wrap">
+    <div class="gutter section" style="display:grid;gap:8px">
+      <div class="card" style="padding:12px 14px"><b>Agora:</b> ${esc(r.nome)}${r.escolhido ? '' : ' <span class="muted">(sugestão pela LUC da planta)</span>'}<div class="muted" style="font-size:12.5px">${e.luc ? 'LUC na planta: ' + esc(e.luc) + ' · ' : ''}${Math.round(e.w)}×${Math.round(e.h)} no desenho</div></div>
+      <div class="search" style="padding:0"><input id="espBusca" type="search" placeholder="Buscar loja, LUC ou contrato…" value="${esc(S.ui.espBusca || '')}" autocomplete="off"></div>
+      <div id="espErr"></div>
+    </div>
+    <div class="list" id="espOpts">
+      ${opt('', 'Usar a sugestão da planta', sug.nome, !r.escolhido)}
+      ${opt('V:Disponível', 'Disponível (espaço vago)', 'fica cinza no mapa', r.escolhido && r.vazio && r.nome === 'Disponível')}
+      ${opt('V:Expansão', 'Expansão / obra', 'fica cinza no mapa', r.escolhido && r.vazio && r.nome === 'Expansão')}
+      ${ls.map(l => opt('L:' + l.IdLoja, l.NomeFantasia, `LUC ${l.Luc} · ${l.Piso || '—'}${l.Contrato ? ' · contrato ' + l.Contrato : ''}${l['Situação'] === 'Inativo' ? ' · inativa' : ''}`, r.escolhido && r.loja && r.loja.IdLoja === l.IdLoja)).join('')}
+      ${contratosLivres.length ? `<div class="group-h"><span>Só no Com21 (sem cadastro no app)</span></div>` + contratosLivres.map(c => { const k = S.anal.contratos[c]; return opt('C:' + c, tituloCase(k.nome), `Contrato ${c} · LUC ${k.luc} · último dado ${dBR(k.ultima)}`, r.escolhido && !r.loja && r.contrato === c); }).join('') : ''}
+    </div>
+  </div></main>`;
+  return { html, mount() { filtrarEscolhas(); } };
+};
+function filtrarEscolhas() {
+  const q = norm(S.ui.espBusca || '');
+  $$('#espOpts [data-busca]').forEach(b => { b.hidden = !!q && !b.dataset.busca.includes(q) && b.dataset.val !== ''; });
+}
+async function escolherEspaco(id, val) {
+  if (!DEMO && !navigator.onLine) { $('#espErr').innerHTML = '<div class="alert bad">Alterar o mapa precisa de internet.</div>'; return; }
+  const m = val === '' ? null : val.startsWith('L:') ? { IdLoja: val.slice(2) } : val.startsWith('C:') ? { Contrato: val.slice(2) } : { Rotulo: val.slice(2) };
+  if (m) m.Piso = id.slice(0, 2);
+  $$('#espOpts button').forEach(b => { b.disabled = true; });
+  try {
+    const r = await api('salvarMapa', { mudancas: { [id]: m } });
+    if (S.data) S.data.mapa = r.mapa;
+    S.ver++; await persist();
+    S.ui.espBusca = '';
+    toast('Mapa atualizado.');
+    back();
+  } catch (e) { $('#espErr').innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; $$('#espOpts button').forEach(b => { b.disabled = false; }); }
+}
+
+/* ---------- Faixas de cor e limites (master) ---------- */
+VIEWS.faixas = () => {
+  if (!isMaster()) return VIEWS.painel();
+  const campo = (k, rot, hint) => `<div class="field"><label for="cf_${k}">${rot}</label><input class="input num" id="cf_${k}" data-fx="${k}" inputmode="decimal" value="${esc(String(cfg(k)).replace('.', ','))}">${hint ? `<div class="hint">${hint}</div>` : ''}</div>`;
+  const bloco = (met, t, a, b, hint) => `<div class="card" style="padding:14px;display:grid;gap:10px"><b>${t}</b><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">${a}${b}</div><div class="hm-legend legend" style="margin:0">${legendaFaixas(met)}</div>${hint ? `<div class="hint muted" style="font-size:12.5px">${hint}</div>` : ''}</div>`;
+  const html = `${topbar({ title: 'Faixas de cor e limites', backBtn: true })}
+  <main class="form-main"><div class="wrap gutter" style="display:grid;gap:14px;padding-top:14px">
+    <div class="muted" style="font-size:13.5px">Defina a partir de quando cada loja fica <b style="color:var(--hm-bad)">vermelha</b>, <b style="color:#b8860b">amarela</b> ou <b style="color:var(--hm-ok)">verde</b> no mapa. Vale para todas as lojas e para todos que veem o mapa.</div>
+    ${bloco('vendas', 'Vendas do mês (R$)', campo('mapa_vendas_verm', 'Vermelho abaixo de'), campo('mapa_vendas_verde', 'Verde a partir de'))}
+    ${bloco('m2', 'Venda por m² no mês (R$/m²)', campo('mapa_m2_verm', 'Vermelho abaixo de'), campo('mapa_m2_verde', 'Verde a partir de'))}
+    ${bloco('cresc', 'Crescimento sobre o mesmo mês do ano anterior (%)', campo('mapa_cresc_verm', 'Vermelho abaixo de'), campo('mapa_cresc_verde', 'Verde a partir de'), 'Use número negativo para queda (ex.: -5).')}
+    ${bloco('div', 'Divergência auditoria × lojista (%)', campo('mapa_div_verde', 'Verde até'), campo('mapa_div_verm', 'Vermelho acima de'), 'Aqui quanto menor, melhor.')}
+    <div class="card" style="padding:14px;display:grid;gap:10px"><b>Análises</b>${campo('div_limite', 'Diferença aceitável por dia entre auditoria e lojista (%)', 'Dias acima disso aparecem como "com diferença" nas análises e na comparação dia a dia.')}</div>
+    <div id="fxErr"></div>
+  </div></main>
+  <div class="formbar"><button class="btn" data-act="back">Cancelar</button><button class="btn primary" data-act="saveFaixas">${ICON.check}Salvar</button></div>`;
+  return { html, form: true };
+};
+async function saveFaixas() {
+  if (!DEMO && !navigator.onLine) { $('#fxErr').innerHTML = '<div class="alert bad">Precisa de internet.</div>'; return; }
+  const valores = {}; let erro = '';
+  $$('[data-fx]').forEach(i => { const v = i.value.trim().replace(/\./g, '').replace(',', '.'); if (!/^-?\d+(\.\d+)?$/.test(v)) erro = 'Use apenas números.'; valores[i.dataset.fx] = +v; });
+  const par = (a, b, msg) => { if (!erro && valores[a] > valores[b]) erro = msg; };
+  par('mapa_vendas_verm', 'mapa_vendas_verde', 'Vendas: o limite do vermelho deve ser menor que o do verde.');
+  par('mapa_m2_verm', 'mapa_m2_verde', 'Venda por m²: o limite do vermelho deve ser menor que o do verde.');
+  par('mapa_cresc_verm', 'mapa_cresc_verde', 'Crescimento: o limite do vermelho deve ser menor que o do verde.');
+  par('mapa_div_verde', 'mapa_div_verm', 'Divergência: o limite do verde deve ser menor que o do vermelho.');
+  if (erro) { $('#fxErr').innerHTML = `<div class="alert bad">${esc(erro)}</div>`; return; }
+  const btn = $('[data-act="saveFaixas"]'); btn.disabled = true;
+  try {
+    const r = await api('salvarConfig', { valores });
+    if (S.data) S.data.config = r.config;
+    if (S.anal) S.anal.limite = r.config.div_limite;
+    S.ver++; await persist();
+    toast('Faixas salvas.');
+    back();
+    if (S.anal && valores.div_limite !== undefined) loadAnal(true);
+  } catch (e) { $('#fxErr').innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; btn.disabled = false; }
+}
+
+/* ---------- Importar o relatório do Com21 (master) ---------- */
+const nrmCab = s => norm(s).replace(/[^a-z0-9]/g, '');
+const CAB_COM21 = ['datadavenda', 'numerodocontrato', 'loja', 'nomefantasia', 'tipodeloja', 'ramodeatividade', 'vendas1', 'vendas2', 'vendas3', 'vendastotais'];
+function numBR(v) {
+  if (typeof v === 'number') return v;
+  let s = String(v == null ? '' : v).replace(/[^\d,.-]/g, '');
+  if (!s) return 0;
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(s); return isNaN(n) ? 0 : n;
+}
+function ymdCom21(v) {
+  if (typeof v === 'number' && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 864e5)); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  const s = String(v == null ? '' : v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m) return m[3] + '-' + pad(m[2]) + '-' + pad(m[1]);
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : '';
+}
+async function lerArquivoCom21(file) {
+  if (!file) return;
+  S.imp = { lendo: true, nome: file.name }; render();
+  try {
+    if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+    const buf = await file.arrayBuffer();
+    const wb = window.XLSX.read(buf, { type: 'array', raw: /\.csv$/i.test(file.name) });
+    let rows = null, pos = null;
+    for (const nome of wb.SheetNames) {
+      const aoa = window.XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: '' });
+      for (let i = 0; i < Math.min(15, aoa.length); i++) {
+        const cab = aoa[i].map(nrmCab);
+        if (cab.includes('datadavenda') && cab.includes('vendastotais')) { pos = CAB_COM21.map(c => cab.indexOf(c)); rows = aoa.slice(i + 1); break; }
+      }
+      if (rows) break;
+    }
+    if (!rows) throw new Error('Não encontrei as colunas "Data da Venda" e "Vendas Totais". Use o relatório de vendas totais do Com21.');
+    const linhas = []; let ign = 0;
+    rows.forEach(r => {
+      const g = k => pos[k] < 0 ? '' : r[pos[k]];
+      const d = ymdCom21(g(0)), c = String(g(1) == null ? '' : g(1)).trim();
+      if (!d || !c) { if (r.some(x => x !== '' && x != null)) ign++; return; }
+      const v1 = numBR(g(6)), v2 = numBR(g(7)), v3 = numBR(g(8));
+      const tot = pos[9] < 0 || g(9) === '' ? v1 + v2 + v3 : numBR(g(9));
+      linhas.push([d, c, String(g(2)).trim(), String(g(3)).trim(), String(g(4)).trim(), String(g(5)).trim(), v1, v2, v3, Math.round(tot * 100) / 100]);
+    });
+    if (!linhas.length) throw new Error('O arquivo não tem linhas de venda.');
+    const ds = linhas.map(l => l[0]).sort();
+    const contratos = Array.from(new Set(linhas.map(l => l[1])));
+    S.imp = { nome: file.name, linhas, ign, de: ds[0], ate: ds[ds.length - 1], contratos, total: linhas.reduce((s, l) => s + l[9], 0) };
+  } catch (e) { S.imp = { erro: e.message }; }
+  render();
+}
+async function enviarImportacao() {
+  const I = S.imp; if (!I || !I.linhas || I.enviando) return;
+  if (!DEMO && !navigator.onLine) return toast('Importar precisa de internet.');
+  I.enviando = true; I.feito = 0; render();
+  const TAM = 8000;
+  try {
+    for (let i = 0; i < I.linhas.length; i += TAM) {
+      await api('importarLojista', { linhas: I.linhas.slice(i, i + TAM), inicio: i === 0, ultima: i + TAM >= I.linhas.length, de: I.de, ate: I.ate, contratos: I.contratos, totalLinhas: I.linhas.length });
+      I.feito = Math.min(I.linhas.length, i + TAM);
+      const b = $('#impProg'); if (b) { b.style.width = (I.feito / I.linhas.length * 100).toFixed(0) + '%'; $('#impProgTxt').textContent = int(I.feito) + ' de ' + int(I.linhas.length) + ' linhas enviadas'; }
+    }
+    S.imp = { ok: `${int(I.linhas.length)} linhas importadas (${dBR(I.de)} a ${dBR(I.ate)}).` };
+    toast('Vendas do Com21 importadas.');
+    loadAnal(true);
+  } catch (e) { I.enviando = false; I.erroEnvio = e.message + (I.feito ? ` (${int(I.feito)} linhas já tinham sido enviadas; importe o arquivo de novo para completar)` : ''); }
+  render();
+}
+async function importarColado() {
+  if (!DEMO && !navigator.onLine) return toast('Precisa de internet.');
+  const btn = $('[data-act="impColado"]'); if (btn) { btn.disabled = true; btn.lastChild.textContent = 'Processando…'; }
+  try {
+    const r = await api('importarColado');
+    S.imp = { ok: `${int(r.linhas)} linhas importadas da aba Com21_Colar (${dBR(r.de)} a ${dBR(r.ate)}).` };
+    loadAnal(true);
+  } catch (e) { S.imp = { erro: e.message }; }
+  render();
+}
+VIEWS.importar = () => {
+  if (!isMaster()) return VIEWS.painel();
+  const I = S.imp || {};
+  const html = `${topbar({ title: 'Importar vendas do Com21', backBtn: true })}
+  <main><div class="wrap gutter" style="display:grid;gap:14px;padding-top:14px">
+    ${I.ok ? `<div class="alert ok"><div>${esc(I.ok)}</div></div>` : ''}
+    ${I.erro ? `<div class="alert bad"><div>${esc(I.erro)}</div></div>` : ''}
+    <div class="card" style="padding:16px;display:grid;gap:12px">
+      <b>1. Pelo arquivo do Com21</b>
+      <div class="muted" style="font-size:13.5px">Escolha o relatório de vendas totais (.xlsx) exportado do Com21, com as colunas Data da Venda, Numero Do Contrato, Loja, Nome Fantasia, Vendas1, Vendas2, Vendas3 e Vendas Totais. Pode ser de um mês ou de vários.</div>
+      <label class="btn primary" style="position:relative">${ICON.plus}Escolher arquivo<input type="file" id="impArq" accept=".xlsx,.xls,.csv" style="position:absolute;inset:0;opacity:0"></label>
+      ${I.lendo ? `<div class="loading">Lendo ${esc(I.nome)}…</div>` : ''}
+      ${I.linhas ? `<div class="kpis">
+        <div class="kpi wide"><span class="l">${esc(I.nome)}</span><span class="v num">${dBR(I.de)} a ${dBR(I.ate)}</span></div>
+        <div class="kpi"><span class="l">Linhas</span><span class="v num">${int(I.linhas.length)}</span>${I.ign ? `<span class="d muted">${I.ign} ignoradas</span>` : ''}</div>
+        <div class="kpi"><span class="l">Contratos</span><span class="v num">${int(I.contratos.length)}</span></div>
+        <div class="kpi wide"><span class="l">Vendas totais no arquivo</span><span class="v num">${money(I.total)}</span></div></div>
+        <div class="alert warn"><div>As vendas desses contratos entre ${dBR(I.de)} e ${dBR(I.ate)} que já estiverem na planilha serão <b>substituídas</b> pelas do arquivo. O resto fica como está.</div></div>
+        ${I.erroEnvio ? `<div class="alert bad"><div>${esc(I.erroEnvio)}</div></div>` : ''}
+        ${I.enviando ? `<div class="bar"><i id="impProg" style="width:${I.feito ? (I.feito / I.linhas.length * 100).toFixed(0) : 2}%"></i></div><div class="muted num" id="impProgTxt" style="font-size:13px">Enviando…</div>`
+          : `<button class="btn primary" data-act="impEnviar">${ICON.check}Enviar para a planilha</button>`}` : ''}
+    </div>
+    <div class="card" style="padding:16px;display:grid;gap:10px">
+      <b>2. Ou colando na planilha</b>
+      <div class="muted" style="font-size:13.5px">Abra a planilha, vá na aba <b>Com21_Colar</b>, cole o relatório a partir da célula A1 (com ou sem o cabeçalho) e toque no botão abaixo. A aba é limpa depois de processar.</div>
+      <button class="btn" data-act="impColado">${ICON.sync}Processar a aba Com21_Colar</button>
+    </div>
+    <div class="muted" style="font-size:12.5px">Os dados ficam na aba <b>Vendas_Lojista</b>. O cinema, a Littera e a Fini entram pelo total; no cinema o app guarda também bilheteria (Vendas1), bomboniere (Vendas2) e publicidade (Vendas3).</div>
+  </div></main>`;
+  return { html };
+};
+
+/* ---------- Juntar as lojas do cinema (master) ---------- */
+function cinemaSeparado() {
+  return lojasAll().filter(l => /^20102-/.test(String(l.Contrato).trim()) && l['Situação'] !== 'Inativo');
+}
+VIEWS.cinema = () => {
+  const ps = cinemaSeparado();
+  const n = merged().list.filter(v => ps.some(l => l.IdLoja === v.loja)).length;
+  const html = `${topbar({ title: 'Cinema numa loja só', backBtn: true })}
+  <main><div class="wrap gutter" style="display:grid;gap:14px;padding-top:14px">
+    ${ps.length ? `<div class="card" style="padding:16px;display:grid;gap:10px">
+      <div>Hoje o cinema está em <b>${ps.length} lojas</b>: ${ps.map(l => esc(l.NomeFantasia)).join(', ')}.</div>
+      <div>O app vai:</div>
+      <ul style="margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px">
+        <li>criar a loja <b>Cine Show</b> (LUC 201, contrato 20102), com os campos Bilheteria, Bomboniere e Publicidade no lançamento;</li>
+        <li>somar os lançamentos antigos por dia (cada parte no seu campo) na loja nova${n ? ` (${int(n)} lançamentos carregados neste aparelho; os demais são somados na planilha)` : ''};</li>
+        <li>guardar os lançamentos originais na aba <b>Dados_Arquivo</b>;</li>
+        <li>deixar as ${ps.length} lojas antigas inativas.</li>
+      </ul>
+      <div class="alert warn"><div>Faça quando ninguém estiver lançando o cinema. Não dá para desfazer pelo app (os originais ficam guardados na aba Dados_Arquivo).</div></div>
+      <div id="cineErr"></div>
+      <button class="btn primary" data-act="cinemaGo">${ICON.check}Juntar agora</button></div>` : '<div class="alert ok"><div>O cinema já está numa loja só.</div></div>'}
+  </div></main>`;
+  return { html };
+};
+async function unificarCinema() {
+  if (!DEMO && !navigator.onLine) { $('#cineErr').innerHTML = '<div class="alert bad">Precisa de internet.</div>'; return; }
+  if (S.queue.some(q => q.type === 'venda' && cinemaSeparado().some(l => l.IdLoja === q.venda.Loja))) { $('#cineErr').innerHTML = '<div class="alert bad">Há lançamentos do cinema na fila deste aparelho. Sincronize antes.</div>'; return; }
+  const btn = $('[data-act="cinemaGo"]'); btn.disabled = true; btn.lastChild.textContent = 'Juntando… (pode levar até 1 minuto)';
+  try {
+    const r = await api('unificarCinema');
+    S.lojaFetched = new Set(); S.mesFetched = new Set();
+    toast(r.jaFeito ? 'O cinema já estava unificado.' : `Pronto: ${int(r.lancamentos)} lançamentos viraram ${int(r.dias)} dias em ${r.loja.NomeFantasia}.`);
+    await sync({ full: true, quiet: false });
+    back();
+  } catch (e) { $('#cineErr').innerHTML = `<div class="alert bad">${esc(e.message)}</div>`; btn.disabled = false; btn.lastChild.textContent = 'Juntar agora'; }
+}
+
 /* ---------- Conta / sincronização ---------- */
 VIEWS.mais = () => {
   const errs = S.queue.filter(q => q.error);
@@ -1972,7 +2730,7 @@ VIEWS.mais = () => {
     <div class="gutter section">
       <div class="card" style="padding:16px;display:flex;gap:14px;align-items:center">
         ${audAvatar(S.user.id, 52)}
-        <div style="min-width:0;flex:1"><div style="font-weight:800;font-size:17px">${esc(S.user.nome)}</div><div class="muted" style="font-size:13px">${isMaster() ? 'Master — pode alterar todas as informações' : 'Auditor(a) — lança vendas e solicita alterações'}</div></div>
+        <div style="min-width:0;flex:1"><div style="font-weight:800;font-size:17px">${esc(S.user.nome)}</div><div class="muted" style="font-size:13px">${isMaster() ? 'Master — pode alterar todas as informações' : isConsulta() ? 'Consulta — vê painéis, análises e o mapa' : 'Auditor(a) — lança vendas e solicita alterações'}</div></div>
         <button class="btn" data-act="logout">Sair</button>
       </div>
     </div>
@@ -1995,6 +2753,10 @@ VIEWS.mais = () => {
       <button class="btn" style="width:100%" data-act="recarregarLogos">${ICON.sync}Recarregar logos das lojas</button>
       <button class="btn" style="width:100%" data-act="rotaConfig">${ICON.route}Lojas da rota diária</button>
       <button class="btn" style="width:100%" data-act="regras">${ICON.chart}Regras e pontuação da equipe</button>
+      <h3 class="h2" style="margin:8px 0 0">Lojista e mapa</h3>
+      <button class="btn" style="width:100%" data-act="importar">${ICON.sync}Importar vendas do Com21</button>
+      <button class="btn" style="width:100%" data-act="faixas">${ICON.chart}Faixas de cor do mapa e limites</button>
+      ${cinemaSeparado().length ? `<button class="btn" style="width:100%" data-act="cinema">${ICON.store}Juntar as ${cinemaSeparado().length} lojas do cinema</button>` : ''}
     </div>` : ''}
     ${S.installEvt ? `<div class="gutter section"><h3 class="h2">Aplicativo</h3><button class="btn primary" style="width:100%" data-act="install">Instalar na tela inicial</button></div>` : ''}
     <div class="gutter section">
@@ -2084,7 +2846,7 @@ VIEWS.auditores = () => {
     ${!S.audList && !S.audErr ? '<div class="loading">Carregando…</div>' : ''}
     <div class="list">${l.map(a => `<button class="row" style="grid-template-columns:auto 1fr auto" data-aud="${esc(a.id)}">
       ${audAvatar(a.id, 44)}
-      <div><div class="t">${esc(a.nome)}</div><div class="s">${a.perfil === 'Master' ? 'Master' : 'Auditor'}</div></div>
+      <div><div class="t">${esc(a.nome)}</div><div class="s">${a.perfil || 'Auditor'}</div></div>
       <div class="v">${a.situacao === 'Inativo' ? '<span class="status st-no">Inativo</span>' : '<span class="status st-ok">Ativo</span>'}</div></button>`).join('')}</div>
   </div></main>`;
   return { html };
@@ -2107,8 +2869,8 @@ VIEWS.audForm = (p) => {
       <div class="field" id="fdAudSenha"><label for="audSenha">${p.id ? 'Nova senha' : 'Senha'}${p.id ? '' : '<span class="req">*</span>'}</label>
         <input class="input" id="audSenha" inputmode="numeric" autocomplete="off" placeholder="${p.id ? 'Deixe em branco para manter a atual' : 'Mínimo 4 caracteres'}">
         <div class="hint">A senha atual não é exibida por segurança.</div></div>
-      <div class="field"><span class="label">Perfil</span>${seg('perfil', ['Auditor', 'Master'], a.perfil)}
-        <div class="hint">Master altera tudo e aprova correções. Auditor lança vendas e pede correções.</div></div>
+      <div class="field"><span class="label">Perfil</span>${seg('perfil', ['Auditor', 'Consulta', 'Master'], a.perfil)}
+        <div class="hint">Master altera tudo e aprova correções. Auditor lança vendas e pede correções. Consulta só vê painéis, análises, mapa e os totais das lojas (sem assinaturas).</div></div>
       <div class="field"><span class="label">Situação</span>${seg('situacao', ['Ativo', 'Inativo'], a.situacao)}
         <div class="hint">${self ? 'Você não pode mudar o seu próprio perfil nem se desativar.' : 'Inativo não consegue entrar no app, mas o histórico dele é mantido.'}</div></div>
       <div id="audErr"></div>
@@ -2164,7 +2926,7 @@ async function doLogin() {
     S.user = { id: r.user.id, nome: r.user.nome, senha, perfil: r.user.perfil || 'Auditor' };
     S.avisoTroca = false;
     await persist();
-    S.stack = [{ v: 'rota', p: {} }];
+    S.stack = [{ v: inicioPerfil(), p: {} }];
     render();
     toast('Olá, ' + S.user.nome.split(' ')[0] + '! Carregando lojas…');
     await sync({ full: true, quiet: false });
@@ -2179,7 +2941,8 @@ async function logout(silent) {
     if (!S.confirmLogout) { S.confirmLogout = true; toast('Há ' + S.queue.length + ' item(ns) não enviados. Toque em Sair de novo para sair mesmo assim.'); setTimeout(() => { S.confirmLogout = false; }, 5000); return; }
   }
   if (!silent) { try { await api('logout'); } catch (e) { /* sem internet: segue */ } }
-  S.user = null; S.confirmLogout = false;
+  S.user = null; S.confirmLogout = false; S.anal = null; S.analAt = 0; S.lojCache = {};
+  try { KV.set('anal', null); } catch (e) { /* ok */ }
   await persist();
   S.stack = [{ v: 'login', p: {} }];
   render(); loadAuditores();
@@ -2188,7 +2951,8 @@ async function logout(silent) {
 /* Quando o app passa a usar outra planilha: limpa os dados guardados e pede login de novo.
    O que estava na fila não é enviado automaticamente para a planilha nova. */
 async function trocouServidor() {
-  S.data = null; S.user = null; S.lastSync = 0; S.auditoresLogin = [];
+  S.data = null; S.user = null; S.lastSync = 0; S.auditoresLogin = []; S.anal = null;
+  try { await KV.set('anal', null); } catch (e) { /* ok */ }
   S.vmap = new Map(); S.lojaFetched = new Set(); S.mesFetched = new Set();
   S.queue.forEach(q => { q.error = 'Feito antes da troca de planilha. Envie para a planilha nova só se for um lançamento real; senão, descarte.'; q.retry = false; });
   S.avisoTroca = true;
@@ -2232,10 +2996,15 @@ function updateChrome(full) {
 
 /* ============================ Eventos ============================ */
 document.addEventListener('click', e => {
-  const t = e.target.closest('[data-act],[data-hordem],[data-tema],[data-jog],[data-paba],[data-rotatoggle],[data-gmes],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
+  const t = e.target.closest('[data-esp],[data-anrank],[data-mpiso],[data-mmet],[data-mfonte],[data-act],[data-hordem],[data-tema],[data-jog],[data-paba],[data-rotatoggle],[data-gmes],[data-aud],[data-segval],[data-solic],[data-ptipo],[data-tab],[data-loja],[data-registrar],[data-venda],[data-filtro],[data-htab],[data-rank],[data-resp],[data-mot],[data-step],[data-who],[data-sit]');
   if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.tab) return tab(d.tab);
+  if (d.esp) { if (S.ui.mapaEdit && isMaster()) return go('mapaEspaco', { id: d.esp }); S.ui.mapaSel = S.ui.mapaSel === d.esp ? '' : d.esp; return refresh(); }
+  if (d.anrank) { S.ui.anRank = d.anrank; return refresh(); }
+  if (d.mpiso) { S.ui.mapaPiso = d.mpiso; S.ui.mapaSel = ''; return refresh(); }
+  if (d.mmet) { S.ui.mapaMet = d.mmet; return refresh(); }
+  if (d.mfonte) { S.ui.mapaFonte = d.mfonte; return refresh(); }
   if (d.hordem) { S.ui.histOrdem = d.hordem; S.ui.histLim = 12; return render(); }
   if (d.tema) { setTema(d.tema); $$('[data-tema]').forEach(b => b.setAttribute('aria-pressed', b === t)); return; }
   if (d.paba) { S.ui.painelAba = d.paba; render(); return window.scrollTo(0, 0); }
@@ -2247,6 +3016,7 @@ document.addEventListener('click', e => {
   if (d.ptipo) { $$('[data-ptipo]').forEach(b => b.setAttribute('aria-pressed', b === t)); $('#pCampos').hidden = d.ptipo === 'Exclusão'; return; }
   if (d.registrar !== undefined) {
     e.stopPropagation();
+    if (isConsulta()) return;
     const par = { loja: d.registrar, data: d.data || ontem(), modo: d.modo || 'dia' };
     return cur().v === 'proxima' ? replace('registrar', par) : go('registrar', par);
   }
@@ -2364,6 +3134,22 @@ document.addEventListener('click', e => {
     }
     case 'resetUrl': S.stack = [{ v: 'setup', p: {} }]; return render();
     case 'loginGo': return doLogin();
+    case 'importar': S.imp = null; return go('importar');
+    case 'faixas': return go('faixas');
+    case 'cinema': return go('cinema');
+    case 'cinemaGo': return unificarCinema();
+    case 'impEnviar': return enviarImportacao();
+    case 'impColado': return importarColado();
+    case 'analRecarregar': return loadAnal(true);
+    case 'anMes': S.ui.anMes = d.mes; return refresh();
+    case 'mapaZoom': S.ui.mapaZoom = +d.z; return refresh();
+    case 'mapaEdit': S.ui.mapaEdit = !S.ui.mapaEdit; S.ui.mapaSel = ''; return refresh();
+    case 'mapaTrocar': return go('mapaEspaco', { id: d.id });
+    case 'mapaFechar': S.ui.mapaSel = ''; return refresh();
+    case 'escolher': return escolherEspaco(cur().p.id, d.val);
+    case 'saveFaixas': return saveFaixas();
+    case 'comparar': return go('comparar', { id: d.id, mes: d.mes });
+    case 'anMais': S.ui.anMais = Object.assign({}, S.ui.anMais, { [d.k]: !(S.ui.anMais || {})[d.k] }); return refresh();
   }
 });
 document.addEventListener('keydown', e => {
@@ -2377,6 +3163,7 @@ document.addEventListener('input', e => {
   if (id === 'vResp') e.target.dataset.auto = '';
   if (id === 'busca') { S.ui.busca = e.target.value; debounceRender(); }
   if (id === 'hBusca') { S.ui.histBusca = e.target.value; debounceRender(); }
+  if (id === 'espBusca') { S.ui.espBusca = e.target.value; filtrarEscolhas(); }
 });
 document.addEventListener('change', e => {
   const id = e.target.id;
@@ -2396,6 +3183,7 @@ document.addEventListener('change', e => {
   }
   if (e.target.dataset && e.target.dataset.rotachk) { S.rotaEdit[e.target.dataset.rotachk] = e.target.checked ? 'Sim' : 'Não'; const n = $('#rotaCount'); if (n) n.textContent = rotaConfigResumo(); }
   if (id === 'hAud') { S.ui.histAud = e.target.value; render(); }
+  if (id === 'impArq') lerArquivoCom21(e.target.files[0]);
 });
 let drT = null;
 function debounceRender() { clearTimeout(drT); drT = setTimeout(render, 180); }
@@ -2437,7 +3225,8 @@ setInterval(() => { if (S.user && S.queue.length) sync({ full: false }); }, 60e3
   rebuildFromData();
   if (!DEMO && !S.apiUrl) { S.stack = [{ v: 'setup', p: {} }]; return render(); }
   if (!S.user) { S.stack = [{ v: 'login', p: {} }]; render(); return loadAuditores(); }
-  S.stack = [{ v: 'rota', p: {} }];
+  S.stack = [{ v: inicioPerfil(), p: {} }];
+  try { const an = await KV.get('anal'); if (an && an.r) { S.anal = an.r; S.analAt = an.at || 0; } } catch (e) { /* sem cache */ }
   render();
   sync({ full: true });
 })();
