@@ -270,6 +270,9 @@ select.chip { appearance: none; padding-right: 26px; background-image: url("data
 .cmp-b i.ok { background: var(--hm-ok); } .cmp-b i.bad { background: var(--hm-bad); } .cmp-b i.ref { background: var(--muted); opacity: .45; }
 .fun { background: var(--soft); border-radius: 10px; padding: 9px 12px; display: grid; grid-template-columns: 1fr auto; gap: 0 8px; min-width: 210px; }
 .fun span { font-size: 12.5px; color: var(--muted); font-weight: 600; } .fun b { font-size: 16px; grid-row: span 2; align-self: center; } .fun small { font-size: 11.5px; color: var(--muted); }
+.seg-scroll { display: flex; overflow-x: auto; scrollbar-width: none; } .seg-scroll::-webkit-scrollbar { display: none; }
+.seg-scroll button { flex: 1 0 auto; padding: 8px 12px; }
+.rank.abc-A { background: var(--brand); color: var(--surface); } .rank.abc-B { background: var(--hm-mid); color: #3d2e00; } .rank.abc-C { background: var(--soft); color: var(--muted); }
 .linkbtn { border: 0; background: none; color: var(--brand); font-weight: 700; padding: 0; font-size: inherit; text-decoration: underline; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
 .month-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
