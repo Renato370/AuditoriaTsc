@@ -1,9 +1,12 @@
 /* Service worker: guarda o app no aparelho para abrir sem internet. */
-const CACHE = 'auditoria-v1.6.1';
+const CACHE = 'auditoria-v1.7.0';
 const SHELL = ['./', 'index.html', 'app.js', 'config.js', 'app-v141.webmanifest', 'icons/selo2-192.png', 'icons/selo2-512.png', 'icons/shopping-logo.png', 'icons/selo2-apple-180.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => {
+    c.add('xlsx.full.min.js').catch(() => {});             // leitor de Excel: guardado à parte, não trava a instalação
+    return c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })));
+  }).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
