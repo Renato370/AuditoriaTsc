@@ -272,6 +272,11 @@ select.chip { appearance: none; padding-right: 26px; background-image: url("data
 .fun span { font-size: 12.5px; color: var(--muted); font-weight: 600; } .fun b { font-size: 16px; grid-row: span 2; align-self: center; } .fun small { font-size: 11.5px; color: var(--muted); }
 .seg-scroll { display: flex; overflow-x: auto; scrollbar-width: none; } .seg-scroll::-webkit-scrollbar { display: none; }
 .seg-scroll button { flex: 1 0 auto; padding: 8px 12px; }
+/* computador (mouse): filtros quebram linha em vez de rolar para o lado, que o mouse não alcança */
+@media (hover: hover) and (pointer: fine) {
+  .chips, .seg-scroll { flex-wrap: wrap; overflow-x: visible; }
+  .seg-scroll button { flex: 0 1 auto; }
+}
 .rank.abc-A { background: var(--brand); color: var(--surface); } .rank.abc-B { background: var(--hm-mid); color: #3d2e00; } .rank.abc-C { background: var(--soft); color: var(--muted); }
 .linkbtn { border: 0; background: none; color: var(--brand); font-weight: 700; padding: 0; font-size: inherit; text-decoration: underline; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow); }
@@ -334,6 +339,16 @@ select.chip { appearance: none; padding-right: 26px; background-image: url("data
 .alug-g { align-items: end; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; font-size: 13.5px; font-weight: 700; }
 .alug-g span { display: block; font-size: 11px; font-weight: 500; color: var(--muted); line-height: 1.2; }
 .alug-s { font-size: 12.5px; }
+.me-chip { display: flex; align-items: center; gap: 6px; border: 0; background: rgba(255,255,255,.14); color: inherit; border-radius: 999px; padding: 3px 10px 3px 3px; font: 600 13px/1 var(--font); flex: none; max-width: 120px; }
+.me-chip span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 360px) { .me-chip { padding-right: 3px; } .me-chip span:last-child { display: none; } }
+.hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kpi.hub { position: relative; text-align: left; font: inherit; color: inherit; cursor: pointer; align-content: start; padding-right: 30px; min-height: 112px; }
+.kpi.hub:active { background: var(--soft); }
+.hub-go { position: absolute; right: 8px; top: 10px; color: var(--muted); display: grid; } .hub-go svg { width: 18px; height: 18px; }
+.kpi.hub .v { font-size: 19px; white-space: normal; overflow-wrap: anywhere; }
+.hub-mapa { display: block; margin-top: 6px; } .planta.mini { width: 100%; min-width: 0; height: 90px; } .planta.mini path { stroke-width: 3; }
+@media (min-width: 720px) { .hub-grid { grid-template-columns: repeat(4, 1fr); } }
 @media print {
   .no-print, .nav, .fab, body::before, .formbar, #toast, #splash, .seg, .filtros3, .cal-nav, .more, .demo-banner { display: none !important; }
   body, main, .wrap { background: #fff !important; overflow: visible !important; height: auto !important; position: static !important; }
